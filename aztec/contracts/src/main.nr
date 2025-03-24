@@ -58,6 +58,21 @@ pub contract Wormhole {
     }
 
     #[public]
+    fn expire_guardian_set(index: u32, current_timestamp: u32) -> Field {
+        // Get the guardian set
+        let mut guardian_set = storage.guardian_sets.at(index).read();
+        
+        // Update the expiration time
+        guardian_set.expiration_time = current_timestamp + 86400;
+        
+        // Write the updated guardian set back to storage
+        storage.guardian_sets.at(index).write(guardian_set);
+        
+        // Return storage slot for key
+        derive_storage_slot_in_map(storage.guardian_sets.storage_slot, index)
+    }
+
+    #[public]
     fn set_guardian_set_index(a: u32) {
         storage.guardian_set_index.write(a);
     }
@@ -102,7 +117,7 @@ pub contract Wormhole {
     }
 
     #[public]
-    fn add_initialized_implementation(to: Field, ii: bool) -> Field {
+    fn set_initialized_implementation(to: Field, ii: bool) -> Field {
         storage.initialized_implementations.at(to).write(ii);
         // returns storage slot for key
         derive_storage_slot_in_map(storage.initialized_implementations.storage_slot, to)
