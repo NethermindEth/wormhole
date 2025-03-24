@@ -28,7 +28,14 @@ async function main() {
 
   const contract = await Contract.at(token.address, WormholeJsonContractArtifact, ownerWallet);
 
-  const _tx = await contract.methods.publishMessage().send().wait();
+  // The message to convert
+  let message = "Hello I am stavros vlachakis";
+
+  // Using TextEncoder (modern approach)
+  let encoder = new TextEncoder();
+  let bytes = encoder.encode(message);
+
+  const _tx = await contract.methods.publishMessage(1,bytes, 2).send().wait();
 
   const sampleLogFilter = {
     txHash: '0x100ebe8cfa848587397b272a40426223004c5ee3838d22652c33e10c7fe7d1f7',
