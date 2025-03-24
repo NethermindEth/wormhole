@@ -19,8 +19,8 @@ pub contract Wormhole {
 
     use dep::aztec::protocol_types::{
         storage::map::derive_storage_slot_in_map,
+        traits::ToField,
     };
-    // docs:end:all-deps
 
     #[storage]
     struct Storage<Context> {
@@ -28,7 +28,7 @@ pub contract Wormhole {
         guardian_sets: Map<u32, PublicMutable<GuardianSet, Context>, Context>,
         guardian_set_index: PublicMutable<u32, Context>,
         guardian_set_expiry: PublicMutable<u32, Context>,
-        sequences: Map<Field, PublicMutable<u64, Context>, Context>,
+        sequences: Map<AztecAddress, PublicMutable<Field, Context>, Context>,
         consumed_governance_actions: Map<Field, PublicMutable<bool, Context>, Context>,
         initialized_implementations: Map<Field, PublicMutable<bool, Context>, Context>,
         message_fee: PublicMutable<Field, Context>,
@@ -93,14 +93,14 @@ pub contract Wormhole {
     }
 
     #[public]
-    fn add_sequence(to: Field, sequence: u64) -> Field {
+    fn add_sequence(to: AztecAddress, sequence: Field) -> Field {
         storage.sequences.at(to).write(sequence);
         // returns storage slot for key
         derive_storage_slot_in_map(storage.sequences.storage_slot, to)
     }
 
     #[public]
-    fn get_sequences(address: Field) -> u64 {
+    fn get_sequences(address: AztecAddress) -> Field {
         storage.sequences.at(address).read()
     }
 
@@ -148,29 +148,35 @@ pub contract Wormhole {
         storage.evm_chain_id.read()
     }
 
+    // Publish a message to be attested by the Wormhole network
     #[public]
-    // this-will-error:init-header-error
-    fn publishMessage() {
+    fn publishMessage(
+        nonce: u32,
+        payload: [u8; 4], // size of payload needs investigation, looks like max size is Field's size unless we send multiple logs.
+        consistencyLevel: u8) {
+        // check fee
+        assert(context.transaction_fee() == get_message_fee(), "invalid fee");
+
+        let sequence = useSequence(context.msg_sender());
+        
         // Create an array of Field elements
         let message = [
-            // Convert characters to Field elements
-            // You can add more elements here to make a larger log
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056,
-            0x2f3eefd1f011195f659ebc59c04d876a62cd2579eeaa16f4485ac404006fd056
+            context.msg_sender().to_field(),
+            sequence,  // Already a Field
+            Field::from(nonce),
+            Field::from_be_bytes(payload),
+            Field::from(consistencyLevel)
         ];
         
+        // emit log
         context.emit_public_log(message);
+    }
+
+    #[public]
+    fn useSequence(emitter: AztecAddress) -> Field {
+        let sequence = get_sequences(emitter);
+        add_sequence(emitter, sequence + 1);
+        sequence
     }
 
 }
