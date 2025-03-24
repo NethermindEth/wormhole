@@ -31,7 +31,7 @@ pub struct VM {
     consistency_level: u8,
     payload: [u8; 1024], // Fixed size for byte arrays in Noir, adjust as needed
     guardian_set_index: u32,
-    signatures: [Signature; 10], // Assuming max 10 signatures
+    signatures: [Signature; 13], // Assuming max 13 signatures
     hash: [u8; 32]
 }
 
