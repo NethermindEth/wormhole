@@ -21,7 +21,7 @@ pub struct Signature {
     guardian_index: u8
 }
 
-pub struct VM {
+pub struct VAA {
     version: u8,
     timestamp: u32,
     nonce: u32,
