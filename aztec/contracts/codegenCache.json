@@ -1,0 +1,14 @@
+{
+  "aztec-AvmTest.json": {
+    "contractName": "AvmTest",
+    "hash": "84025a7268518d9bc16177830f00d6ea193a03edd8b732a5b2afbc3dc18b842c"
+  },
+  "aztec-Crowdfunding.json": {
+    "contractName": "Crowdfunding",
+    "hash": "f5e5dd4e740925f01294902507b2088408db1612ce51529c3cbfbadcfc397b9d"
+  },
+  "aztec-Wormhole.json": {
+    "contractName": "Wormhole",
+    "hash": "ff9393c57e5ee6dcc53210eee5aa7f6df57a2f8e83be2bf3de7276ce68ed5872"
+  }
+}
