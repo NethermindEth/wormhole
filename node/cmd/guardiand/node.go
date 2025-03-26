@@ -387,7 +387,7 @@ func init() {
 	aptosAccount = NodeCmd.Flags().String("aptosAccount", "", "aptos account")
 	aptosHandle = NodeCmd.Flags().String("aptosHandle", "", "aptos handle")
 
-	aztecRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "aztecRPC", "Aztec RPC URL", "http://aztec:8080", []string{"http", "https"})
+	aztecRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "aztecRPC", "Aztec RPC URL", "http://192.168.1.6:8080", []string{"http", "https"})
 	aztecContract = NodeCmd.Flags().String("aztecContract", "", "aztec contract")
 
 	movementRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "movementRPC", "Movement RPC URL", "", []string{"http", "https"})
@@ -1016,6 +1016,7 @@ func runNode(cmd *cobra.Command, args []string) {
 	rpcMap["hyperEvmRPC"] = *hyperEvmRPC
 	rpcMap["monadRPC"] = *monadRPC
 	rpcMap["movementRPC"] = *movementRPC
+	rpcMap["aztecRPC"] = *aztecRPC
 
 	// Wormchain is in the 3000 range.
 	rpcMap["wormchainURL"] = *wormchainURL

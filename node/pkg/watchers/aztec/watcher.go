@@ -2,8 +2,6 @@ package aztec
 
 import (
 	"context"
-	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,10 +16,6 @@ import (
 	"github.com/certusone/wormhole/node/pkg/readiness"
 	"github.com/certusone/wormhole/node/pkg/supervisor"
 	"github.com/certusone/wormhole/node/pkg/watchers"
-	eth_common "github.com/ethereum/go-ethereum/common"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/tidwall/gjson"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	"go.uber.org/zap"
 )
@@ -41,13 +35,13 @@ type (
 	}
 )
 
-var (
-	aztecMessagesConfirmed = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "wormhole_aztec_observations_confirmed_total",
-			Help: "Total number of verified observations found for the chain",
-		}, []string{"chain_name"})
-)
+// var (
+// 	aztecMessagesConfirmed = promauto.NewCounterVec(
+// 		prometheus.CounterOpts{
+// 			Name: "wormhole_aztec_observations_confirmed_total",
+// 			Help: "Total number of verified observations found for the chain",
+// 		}, []string{"chain_name"})
+// )
 
 // NewWatcher creates a new aztec appid watcher
 func NewWatcher(
@@ -82,8 +76,6 @@ func (e *Watcher) Run(ctx context.Context) error {
 		zap.String("contract", e.aztecContract),
 	)
 
-	executeAztecRequest(e.aztecRPC)
-
 	logger.Info("watcher connecting to RPC node ",
 		zap.String("url", e.aztecRPC),
 	)
@@ -97,185 +89,125 @@ func (e *Watcher) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case r := <-e.obsvReqC:
-			if vaa.ChainID(r.ChainId) != e.chainID {
-				panic("invalid chain ID")
-			}
-
-			// uint64 will read the *first* 8 bytes, but the sequence is stored in the *last* 8.
-			nativeSeq := binary.BigEndian.Uint64(r.TxHash[24:])
-
-			logger.Info("Received obsv request", zap.Uint64("tx_hash", nativeSeq))
-
-			body, err := e.retrievePayload(e.aztecRPC)
-			if err != nil {
-				logger.Error("retrievePayload", zap.Error(err))
-				p2p.DefaultRegistry.AddErrorCount(e.chainID, 1)
-				continue
-			}
-
-			if !gjson.Valid(string(body)) {
-				logger.Error("InvalidJson: " + string(body))
-				p2p.DefaultRegistry.AddErrorCount(e.chainID, 1)
-				break
-
-			}
-
-			outcomes := gjson.ParseBytes(body)
-
-			for _, chunk := range outcomes.Array() {
-				newSeq := chunk.Get("sequence_number")
-				if !newSeq.Exists() {
-					break
-				}
-
-				if newSeq.Uint() != nativeSeq {
-					logger.Error("newSeq != nativeSeq")
-					break
-
-				}
-
-				data := chunk.Get("data")
-				if !data.Exists() {
-					break
-				}
-				e.observeData(logger, data, nativeSeq, true)
-			}
+		case <-e.obsvReqC:
+			executeAztecRequest(e.aztecRPC)
 
 		case <-timer.C:
-			s := ""
-
-			eventsJson, err := e.retrievePayload(s)
-			if err != nil {
-				logger.Error("retrievePayload", zap.Error(err))
-				p2p.DefaultRegistry.AddErrorCount(e.chainID, 1)
-				continue
-			}
-
-			// data doesn't exist yet. skip, and try again later
-			// this happens when the sequence id we're looking up hasn't
-			// been used yet.
-			if string(eventsJson) == "" {
-				continue
-			}
-
-			if !gjson.Valid(string(eventsJson)) {
-				logger.Error("InvalidJson: " + string(eventsJson))
-				p2p.DefaultRegistry.AddErrorCount(e.chainID, 1)
-				continue
-
-			}
-
-			logs := gjson.ParseBytes(eventsJson)
-
-			logger.Info("SVLACHAKIS Logs", zap.Any("logs", logs.Raw))
+			executeAztecRequest(e.aztecRPC)
 		}
 	}
 }
 
-func (e *Watcher) retrievePayload(s string) ([]byte, error) {
-	res, err := http.Get(s) // nolint
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
-	return body, err
-}
+// func (e *Watcher) observeData(logger *zap.Logger, data gjson.Result, nativeSeq uint64, isReobservation bool) {
 
-func (e *Watcher) observeData(logger *zap.Logger, data gjson.Result, nativeSeq uint64, isReobservation bool) {
+// 	logger.Info("SVLACHAKIS Received obsv request", zap.Any("logs", data.Raw))
 
-	logger.Info("SVLACHAKIS Received obsv request", zap.Any("logs", data.Raw))
+// 	em := data.Get("sender")
+// 	if !em.Exists() {
+// 		logger.Error("sender field missing")
+// 		return
+// 	}
 
-	em := data.Get("sender")
-	if !em.Exists() {
-		logger.Error("sender field missing")
-		return
-	}
+// 	emitter := make([]byte, 8)
+// 	binary.BigEndian.PutUint64(emitter, em.Uint())
 
-	emitter := make([]byte, 8)
-	binary.BigEndian.PutUint64(emitter, em.Uint())
+// 	var a vaa.Address
+// 	copy(a[24:], emitter)
 
-	var a vaa.Address
-	copy(a[24:], emitter)
+// 	id := make([]byte, 8)
+// 	binary.BigEndian.PutUint64(id, nativeSeq)
 
-	id := make([]byte, 8)
-	binary.BigEndian.PutUint64(id, nativeSeq)
+// 	var txHash = eth_common.BytesToHash(id) // 32 bytes = d3b136a6a182a40554b2fafbc8d12a7a22737c10c81e33b33d1dcb74c532708b
 
-	var txHash = eth_common.BytesToHash(id) // 32 bytes = d3b136a6a182a40554b2fafbc8d12a7a22737c10c81e33b33d1dcb74c532708b
+// 	v := data.Get("payload")
+// 	if !v.Exists() {
+// 		logger.Error("payload field missing")
+// 		return
+// 	}
 
-	v := data.Get("payload")
-	if !v.Exists() {
-		logger.Error("payload field missing")
-		return
-	}
+// 	pl, err := hex.DecodeString(v.String()[2:])
+// 	if err != nil {
+// 		logger.Error("payload decode")
+// 		return
+// 	}
 
-	pl, err := hex.DecodeString(v.String()[2:])
-	if err != nil {
-		logger.Error("payload decode")
-		return
-	}
+// 	ts := data.Get("timestamp")
+// 	if !ts.Exists() {
+// 		logger.Error("timestamp field missing")
+// 		return
+// 	}
 
-	ts := data.Get("timestamp")
-	if !ts.Exists() {
-		logger.Error("timestamp field missing")
-		return
-	}
+// 	nonce := data.Get("nonce")
+// 	if !nonce.Exists() {
+// 		logger.Error("nonce field missing")
+// 		return
+// 	}
 
-	nonce := data.Get("nonce")
-	if !nonce.Exists() {
-		logger.Error("nonce field missing")
-		return
-	}
+// 	sequence := data.Get("sequence")
+// 	if !sequence.Exists() {
+// 		logger.Error("sequence field missing")
+// 		return
+// 	}
 
-	sequence := data.Get("sequence")
-	if !sequence.Exists() {
-		logger.Error("sequence field missing")
-		return
-	}
+// 	consistencyLevel := data.Get("consistency_level")
+// 	if !consistencyLevel.Exists() {
+// 		logger.Error("consistencyLevel field missing")
+// 		return
+// 	}
 
-	consistencyLevel := data.Get("consistency_level")
-	if !consistencyLevel.Exists() {
-		logger.Error("consistencyLevel field missing")
-		return
-	}
+// 	observation := &common.MessagePublication{
+// 		TxID:             txHash.Bytes(),
+// 		Timestamp:        time.Unix(int64(ts.Uint()), 0),
+// 		Nonce:            uint32(nonce.Uint()), // uint32
+// 		Sequence:         sequence.Uint(),
+// 		EmitterChain:     e.chainID,
+// 		EmitterAddress:   a,
+// 		Payload:          pl,
+// 		ConsistencyLevel: uint8(consistencyLevel.Uint()),
+// 		IsReobservation:  isReobservation,
+// 	}
 
-	observation := &common.MessagePublication{
-		TxID:             txHash.Bytes(),
-		Timestamp:        time.Unix(int64(ts.Uint()), 0),
-		Nonce:            uint32(nonce.Uint()), // uint32
-		Sequence:         sequence.Uint(),
-		EmitterChain:     e.chainID,
-		EmitterAddress:   a,
-		Payload:          pl,
-		ConsistencyLevel: uint8(consistencyLevel.Uint()),
-		IsReobservation:  isReobservation,
-	}
+// 	aztecMessagesConfirmed.WithLabelValues(e.networkID).Inc()
 
-	aztecMessagesConfirmed.WithLabelValues(e.networkID).Inc()
+// 	logger.Info("message observed",
+// 		zap.String("txHash", observation.TxIDString()),
+// 		zap.Time("timestamp", observation.Timestamp),
+// 		zap.Uint32("nonce", observation.Nonce),
+// 		zap.Uint64("sequence", observation.Sequence),
+// 		zap.Stringer("emitter_chain", observation.EmitterChain),
+// 		zap.Stringer("emitter_address", observation.EmitterAddress),
+// 		zap.Binary("payload", observation.Payload),
+// 		zap.Uint8("consistencyLevel", observation.ConsistencyLevel),
+// 	)
 
-	logger.Info("message observed",
-		zap.String("txHash", observation.TxIDString()),
-		zap.Time("timestamp", observation.Timestamp),
-		zap.Uint32("nonce", observation.Nonce),
-		zap.Uint64("sequence", observation.Sequence),
-		zap.Stringer("emitter_chain", observation.EmitterChain),
-		zap.Stringer("emitter_address", observation.EmitterAddress),
-		zap.Binary("payload", observation.Payload),
-		zap.Uint8("consistencyLevel", observation.ConsistencyLevel),
-	)
+// 	e.msgC <- observation
+// }
 
-	e.msgC <- observation
-}
+// func (e *Watcher) retrievePayload(s string) ([]byte, error) {
+// 	res, err := http.Get(s) // nolint
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	defer res.Body.Close()
+// 	body, err := io.ReadAll(res.Body)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return body, err
+// }
 
 func executeAztecRequest(endpoint string) {
+
+	// Create log filter parameter
+	logFilter := map[string]any{
+		"fromBlock": 146,
+		"toBlock":   150,
+	}
+
 	payload := map[string]any{
 		"jsonrpc": "2.0",
-		"method":  "node_getBlockNumber",
-		"params":  []any{},
+		"method":  "node_getPublicLogs",
+		"params":  []any{logFilter},
 		"id":      1,
 	}
 
@@ -286,19 +218,11 @@ func executeAztecRequest(endpoint string) {
 		return
 	}
 
-	// Create the HTTP request
-	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonData))
-	if err != nil {
-		fmt.Println("Error creating request:", err)
-		return
-	}
+	// Create a new buffer with the JSON data
+	bodyReader := bytes.NewBuffer(jsonData)
 
-	// Set the Content-Type header
-	req.Header.Set("Content-Type", "application/json")
-
-	// Create an HTTP client and send the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	// Send the POST request
+	resp, err := http.Post(endpoint, "application/json", bodyReader)
 	if err != nil {
 		fmt.Println("Error sending request:", err)
 		return
@@ -313,5 +237,4 @@ func executeAztecRequest(endpoint string) {
 	}
 
 	fmt.Println("SVLACHAKIS Response:", string(body))
-
 }

@@ -233,7 +233,7 @@ def build_node_yaml():
             if aztec:
                 container["command"] += [
                     "--aztecRPC",
-                    "http://aptos:8080",
+                    "http://192.168.1.6:8080",
                     "--aztecContract",
                     "de0036a9600559e295d5f6802ef6f3f802f510366e0c23912b0655d972166017",
                 ]
@@ -1007,7 +1007,7 @@ if aptos:
         labels = ["aptos"],
         trigger_mode = trigger_mode,
     )
-
+    
 def build_query_server_yaml():
     qs_yaml = read_yaml_stream("devnet/query-server.yaml")
 
