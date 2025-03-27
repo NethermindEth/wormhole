@@ -176,7 +176,7 @@ func (c ChainID) String() string {
 	case ChainIDAptos:
 		return "aptos"
 	case ChainIDAztec:
-		return "polygon_sepolia"
+		return "aztec"
 	case ChainIDArbitrum:
 		return "arbitrum"
 	case ChainIDOptimism:

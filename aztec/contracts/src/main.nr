@@ -152,7 +152,7 @@ pub contract Wormhole {
     #[public]
     fn publishMessage(
         nonce: u32,
-        payload: [u8; 4], // size of payload needs investigation, looks like max size is Field's size unless we send multiple logs.
+        payload: [u8; 24], // size of payload needs investigation, looks like max size is Field's size unless we send multiple logs.
         consistencyLevel: u8) {
         // check fee
         assert(context.transaction_fee() == get_message_fee(), "invalid fee");
@@ -164,8 +164,16 @@ pub contract Wormhole {
             context.msg_sender().to_field(),
             sequence,  // Already a Field
             Field::from(nonce),
+            Field::from(consistencyLevel),
             Field::from_be_bytes(payload),
-            Field::from(consistencyLevel)
+            Field::from_be_bytes(payload),
+            Field::from_be_bytes(payload),
+            Field::from_be_bytes(payload),
+            Field::from_be_bytes(payload),
+            Field::from_be_bytes(payload),
+            Field::from_be_bytes(payload),
+            Field::from_be_bytes(payload),
+            Field::from_be_bytes(payload)
         ];
         
         // emit log

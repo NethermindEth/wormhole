@@ -1,381 +1,428 @@
 package aztec
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
-
-	"bytes"
-	"encoding/json"
 
 	"github.com/certusone/wormhole/node/pkg/common"
 	gossipv1 "github.com/certusone/wormhole/node/pkg/proto/gossip/v1"
 	"github.com/certusone/wormhole/node/pkg/readiness"
 	"github.com/certusone/wormhole/node/pkg/supervisor"
 	"github.com/certusone/wormhole/node/pkg/watchers"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	"go.uber.org/zap"
 )
 
-type (
-	// Watcher is responsible for looking over aztec blockchain and reporting new transactions to the wormhole contract
-	Watcher struct {
-		chainID   vaa.ChainID
-		networkID string
+// Configuration constants
+const (
+	// Time intervals
+	BlockPollingInterval  = 1 * time.Second
+	LogProcessingInterval = 10 * time.Second
 
-		aztecRPC      string
-		aztecContract string
+	// Processing parameters
+	DefaultBatchSize  = 1
+	PayloadInitialCap = 13
 
-		msgC          chan<- *common.MessagePublication
-		obsvReqC      <-chan *gossipv1.ObservationRequest
-		readinessSync readiness.Component
-	}
+	// Default starting block
+	DefaultStartBlock = 0
 )
 
-// var (
-// 	aztecMessagesConfirmed = promauto.NewCounterVec(
-// 		prometheus.CounterOpts{
-// 			Name: "wormhole_aztec_observations_confirmed_total",
-// 			Help: "Total number of verified observations found for the chain",
-// 		}, []string{"chain_name"})
-// )
+// Watcher monitors the Aztec blockchain for message publications
+type Watcher struct {
+	// Chain identification
+	chainID   vaa.ChainID
+	networkID string
 
-var lastProcessedBlock int = -1
+	// Connection details
+	rpcURL          string
+	contractAddress string
 
-// NewWatcher creates a new aztec appid watcher
+	// Communication channels
+	msgC     chan<- *common.MessagePublication
+	obsvReqC <-chan *gossipv1.ObservationRequest
+
+	// Service state
+	readinessSync      readiness.Component
+	lastProcessedBlock int
+}
+
+// metrics for monitoring
+var (
+	aztecMessagesConfirmed = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "wormhole_aztec_observations_confirmed_total",
+			Help: "Total number of verified observations found for the chain",
+		}, []string{"chain_name"})
+)
+
+// NewWatcher creates a new Aztec watcher
 func NewWatcher(
 	chainID vaa.ChainID,
 	networkID watchers.NetworkID,
-	aztecRPC string,
-	aztecContract string,
+	rpcURL string,
+	contractAddress string,
 	msgC chan<- *common.MessagePublication,
 	obsvReqC <-chan *gossipv1.ObservationRequest,
 ) *Watcher {
 	return &Watcher{
-		chainID:       chainID,
-		networkID:     string(networkID),
-		aztecRPC:      aztecRPC,
-		aztecContract: aztecContract,
-		msgC:          msgC,
-		obsvReqC:      obsvReqC,
-		readinessSync: common.MustConvertChainIdToReadinessSyncing(chainID),
+		chainID:            chainID,
+		networkID:          string(networkID),
+		rpcURL:             rpcURL,
+		contractAddress:    contractAddress,
+		msgC:               msgC,
+		obsvReqC:           obsvReqC,
+		readinessSync:      common.MustConvertChainIdToReadinessSyncing(chainID),
+		lastProcessedBlock: DefaultStartBlock,
 	}
 }
 
-// func (e *Watcher) Run(ctx context.Context) error {
-// 	p2p.DefaultRegistry.SetNetworkStats(e.chainID, &gossipv1.Heartbeat_Network{
-// 		ContractAddress: e.aztecContract,
-// 	})
-
-// 	logger := supervisor.Logger(ctx)
-
-// 	logger.Info("Starting watcher",
-// 		zap.String("watcher_name", e.networkID),
-// 		zap.String("rpc", e.aztecRPC),
-// 		zap.String("contract", e.aztecContract),
-// 	)
-
-// 	logger.Info("watcher connecting to RPC node ",
-// 		zap.String("url", e.aztecRPC),
-// 	)
-
-// 	timer := time.NewTicker(time.Second * 1)
-// 	defer timer.Stop()
-
-// 	supervisor.Signal(ctx, supervisor.SignalHealthy)
-
-// 	for {
-// 		select {
-// 		case <-ctx.Done():
-// 			return ctx.Err()
-// 		case <-e.obsvReqC:
-// 			executeAztecRequest(e.aztecRPC)
-
-// 		case <-timer.C:
-// 			executeAztecRequest(e.aztecRPC)
-// 		}
-// 	}
-// }
-
-func (e *Watcher) Run(ctx context.Context) error {
-	// Setup a logger
+// Run starts the watcher service and handles the main event loop
+func (w *Watcher) Run(ctx context.Context) error {
 	logger := supervisor.Logger(ctx)
+	logger.Info("Starting Aztec watcher",
+		zap.String("rpc", w.rpcURL),
+		zap.String("contract", w.contractAddress))
 
-	// Create a connection to the blockchain and subscribe to
-	// core contract events here
-
-	// Create the timer for the get_block_height go routine
-	timer := time.NewTicker(time.Second * 1)
-	defer timer.Stop()
-
-	// Create an error channel
+	// Create an error channel and ticker
 	errC := make(chan error)
 	defer close(errC)
 
 	// Signal that basic initialization is complete
-	readiness.SetReady(e.readinessSync)
+	readiness.SetReady(w.readinessSync)
 
 	// Signal to the supervisor that this runnable has finished initialization
 	supervisor.Signal(ctx, supervisor.SignalHealthy)
 
-	// Create the go routine to handle events from core contract
-	common.RunWithScissors(ctx, errC, "core_events", func(ctx context.Context) error {
-		logger.Error("Entering core_events...")
+	// Start the single block processing goroutine
+	common.RunWithScissors(ctx, errC, "aztec_events", func(ctx context.Context) error {
+		logger.Info("Starting Aztec event processor")
+
 		for {
 			select {
 			case err := <-errC:
-				logger.Error("core_events died", zap.Error(err))
-				return fmt.Errorf("core_events died: %w", err)
+				logger.Error("Worker error detected", zap.Error(err))
+				return fmt.Errorf("worker died: %w", err)
+
 			case <-ctx.Done():
-				logger.Error("coreEvents context done")
+				logger.Info("Context done, shutting down")
 				return ctx.Err()
 
 			default:
-				executeAztecRequestAllBlocks(e.aztecRPC, logger)
-				// Read events and handle them here
-				// If this is a blocking read, then set readiness in the
-				// get_block_height thread. Else, uncomment the following line:
-				readiness.SetReady(e.readinessSync)
-			} // end select
-		} // end for
-	}) // end RunWithScissors
+				// Wait before processing more blocks
+				time.Sleep(LogProcessingInterval)
 
-	// Create the go routine to periodically get the block height
-	common.RunWithScissors(ctx, errC, "get_block_height", func(ctx context.Context) error {
-		for {
-			select {
-			case err := <-errC:
-				logger.Error("get_block_height died", zap.Error(err))
-				return fmt.Errorf("get_block_height died: %w", err)
-			case <-ctx.Done():
-				logger.Error("get_block_height context done")
-				return ctx.Err()
+				// Check for and process new blocks
+				if err := w.fetchAndProcessBlocks(ctx, logger); err != nil {
+					logger.Error("Error processing blocks", zap.Error(err))
+					// Continue instead of returning to maintain service
+				}
 
-			case <-timer.C:
-				// Get the block height
+				// Signal readiness
+				readiness.SetReady(w.readinessSync)
+			}
+		}
+	})
 
-				// Try to handle readiness in core_events go routine.
-				// If core_events read is a blocking read, then handle
-				// readiness here and uncomment the following line:
-				// readiness.SetReady(e.readinessSync)
-			} // end select
-		} // end for
-	}) // end RunWithScissors
-
-	// Create the go routine to listen for re-observation requests
-	common.RunWithScissors(ctx, errC, "fetch_obvs_req", func(ctx context.Context) error {
-		for {
-			select {
-			case err := <-errC:
-				logger.Error("fetch_obvs_req died", zap.Error(err))
-				return fmt.Errorf("fetch_obvs_req died: %w", err)
-			case <-ctx.Done():
-				logger.Error("fetch_obvs_req context done")
-				return ctx.Err()
-			case <-e.obsvReqC:
-				return ctx.Err()
-				// Handle the re-observation request
-			} // end select
-		} // end for
-	}) // end RunWithScissors
-
-	// This is done at the end of the Run function to cleanup as needed
-	// and return the reason for Run() returning.
+	// Wait for context cancellation or error
 	select {
 	case <-ctx.Done():
-		// Close socket(s), if necessary
 		return ctx.Err()
 	case err := <-errC:
-		// Close socket(s), if necessary
 		return err
-	} // end select
-} // end Run()
+	}
+}
 
-// func (e *Watcher) observeData(logger *zap.Logger, data gjson.Result, nativeSeq uint64, isReobservation bool) {
-
-// 	logger.Info("SVLACHAKIS Received obsv request", zap.Any("logs", data.Raw))
-
-// 	em := data.Get("sender")
-// 	if !em.Exists() {
-// 		logger.Error("sender field missing")
-// 		return
-// 	}
-
-// 	emitter := make([]byte, 8)
-// 	binary.BigEndian.PutUint64(emitter, em.Uint())
-
-// 	var a vaa.Address
-// 	copy(a[24:], emitter)
-
-// 	id := make([]byte, 8)
-// 	binary.BigEndian.PutUint64(id, nativeSeq)
-
-// 	var txHash = eth_common.BytesToHash(id) // 32 bytes = d3b136a6a182a40554b2fafbc8d12a7a22737c10c81e33b33d1dcb74c532708b
-
-// 	v := data.Get("payload")
-// 	if !v.Exists() {
-// 		logger.Error("payload field missing")
-// 		return
-// 	}
-
-// 	pl, err := hex.DecodeString(v.String()[2:])
-// 	if err != nil {
-// 		logger.Error("payload decode")
-// 		return
-// 	}
-
-// 	ts := data.Get("timestamp")
-// 	if !ts.Exists() {
-// 		logger.Error("timestamp field missing")
-// 		return
-// 	}
-
-// 	nonce := data.Get("nonce")
-// 	if !nonce.Exists() {
-// 		logger.Error("nonce field missing")
-// 		return
-// 	}
-
-// 	sequence := data.Get("sequence")
-// 	if !sequence.Exists() {
-// 		logger.Error("sequence field missing")
-// 		return
-// 	}
-
-// 	consistencyLevel := data.Get("consistency_level")
-// 	if !consistencyLevel.Exists() {
-// 		logger.Error("consistencyLevel field missing")
-// 		return
-// 	}
-
-// 	observation := &common.MessagePublication{
-// 		TxID:             txHash.Bytes(),
-// 		Timestamp:        time.Unix(int64(ts.Uint()), 0),
-// 		Nonce:            uint32(nonce.Uint()), // uint32
-// 		Sequence:         sequence.Uint(),
-// 		EmitterChain:     e.chainID,
-// 		EmitterAddress:   a,
-// 		Payload:          pl,
-// 		ConsistencyLevel: uint8(consistencyLevel.Uint()),
-// 		IsReobservation:  isReobservation,
-// 	}
-
-// 	aztecMessagesConfirmed.WithLabelValues(e.networkID).Inc()
-
-// 	logger.Info("message observed",
-// 		zap.String("txHash", observation.TxIDString()),
-// 		zap.Time("timestamp", observation.Timestamp),
-// 		zap.Uint32("nonce", observation.Nonce),
-// 		zap.Uint64("sequence", observation.Sequence),
-// 		zap.Stringer("emitter_chain", observation.EmitterChain),
-// 		zap.Stringer("emitter_address", observation.EmitterAddress),
-// 		zap.Binary("payload", observation.Payload),
-// 		zap.Uint8("consistencyLevel", observation.ConsistencyLevel),
-// 	)
-
-// 	e.msgC <- observation
-// }
-
-// func (e *Watcher) retrievePayload(s string) ([]byte, error) {
-// 	res, err := http.Get(s) // nolint
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer res.Body.Close()
-// 	body, err := io.ReadAll(res.Body)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return body, err
-// }
-
-func executeAztecRequestAllBlocks(endpoint string, logger *zap.Logger) {
+// fetchAndProcessBlocks checks for new blocks and processes them if found
+func (w *Watcher) fetchAndProcessBlocks(ctx context.Context, logger *zap.Logger) error {
 	// Get the latest block number
-	latestBlock, err := getLatestBlockNumber(endpoint)
+	latestBlock, err := w.fetchLatestBlockNumber(logger)
 	if err != nil {
-		logger.Error("Error getting latest block", zap.Error(err))
-		return
+		return fmt.Errorf("error getting latest block: %w", err)
 	}
 
 	// Only process if there are new blocks
-	if lastProcessedBlock >= latestBlock {
-		// Only log this at debug level since it's expected behavior
+	if w.lastProcessedBlock >= latestBlock {
 		logger.Debug("No new blocks to process",
 			zap.Int("latest", latestBlock),
-			zap.Int("lastProcessed", lastProcessedBlock))
-		return
+			zap.Int("lastProcessed", w.lastProcessedBlock))
+		return nil
 	}
 
 	// Log that we found new blocks to process
 	logger.Info("Processing new blocks",
-		zap.Int("from", lastProcessedBlock+1),
+		zap.Int("from", w.lastProcessedBlock+1),
 		zap.Int("to", latestBlock))
 
-	// Start from the next unprocessed block
-	startBlock := lastProcessedBlock + 1
-
-	// Process blocks in batches (adjust batch size as needed)
-	batchSize := 2000
-
-	for fromBlock := startBlock; fromBlock <= latestBlock; fromBlock += batchSize {
-		toBlock := fromBlock + batchSize - 1
-		if toBlock > latestBlock {
-			toBlock = latestBlock
-		}
-
-		logger.Info("Processing block batch",
-			zap.Int("fromBlock", fromBlock),
-			zap.Int("toBlock", toBlock))
-
-		// Create log filter parameter
-		logFilter := map[string]any{
-			"fromBlock": fromBlock,
-			"toBlock":   toBlock,
-		}
-
-		payload := map[string]any{
-			"jsonrpc": "2.0",
-			"method":  "node_getPublicLogs",
-			"params":  []any{logFilter},
-			"id":      1,
-		}
-
-		// Marshal the payload to JSON
-		jsonData, err := json.Marshal(payload)
-		if err != nil {
-			logger.Error("Error marshaling JSON", zap.Error(err))
-			continue
-		}
-
-		// Send the POST request
-		resp, err := http.Post(endpoint, "application/json", bytes.NewBuffer(jsonData))
-		if err != nil {
-			logger.Error("Error sending request", zap.Error(err))
-			continue
-		}
-
-		// Read and process the response
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			logger.Error("Error reading response", zap.Error(err))
-			continue
-		}
-
-		// Process logs from this batch
-		processLogs(body, fromBlock, toBlock, logger)
-
-		// Update the last processed block
-		lastProcessedBlock = toBlock
-	}
-
-	logger.Info("Completed processing blocks", zap.Int("up_to", lastProcessedBlock))
+	// Process blocks in batches
+	return w.processBlockRange(ctx, logger, w.lastProcessedBlock+1, latestBlock)
 }
 
-func getLatestBlockNumber(endpoint string) (int, error) {
+// processBlockRange processes a range of blocks in batches
+func (w *Watcher) processBlockRange(ctx context.Context, logger *zap.Logger, startBlock, endBlock int) error {
+	for fromBlock := startBlock; fromBlock <= endBlock; fromBlock += DefaultBatchSize {
+		// Calculate the end of this batch
+		toBlock := fromBlock + DefaultBatchSize - 1
+		if toBlock > endBlock {
+			toBlock = endBlock
+		}
+
+		// Handle quirk for single block ranges (Aztec specific)
+		if fromBlock == toBlock {
+			toBlock = fromBlock + 1
+		}
+
+		// Process this batch
+		if err := w.processBatch(ctx, logger, fromBlock, toBlock); err != nil {
+			logger.Error("Failed to process batch",
+				zap.Int("fromBlock", fromBlock),
+				zap.Int("toBlock", toBlock),
+				zap.Error(err))
+			// Continue with next batch instead of terminating
+			continue
+		}
+
+		// Update the last processed block
+		w.lastProcessedBlock = toBlock
+	}
+
+	logger.Info("Completed processing blocks", zap.Int("up_to", w.lastProcessedBlock))
+	return nil
+}
+
+// processBatch handles fetching and processing logs for a batch of blocks
+func (w *Watcher) processBatch(ctx context.Context, logger *zap.Logger, fromBlock, toBlock int) error {
+	logger.Info("Processing block batch",
+		zap.Int("fromBlock", fromBlock),
+		zap.Int("toBlock", toBlock))
+
+	// Get logs for this block range
+	logs, err := w.fetchPublicLogs(logger, fromBlock, toBlock)
+	if err != nil {
+		return fmt.Errorf("failed to fetch logs: %w", err)
+	}
+
+	logger.Info("Processing logs",
+		zap.Int("count", len(logs)),
+		zap.Int("fromBlock", fromBlock),
+		zap.Int("toBlock", toBlock))
+
+	// Process each log
+	for _, extLog := range logs {
+		if err := w.processLog(ctx, logger, extLog); err != nil {
+			logger.Error("Failed to process log",
+				zap.Int("block", extLog.ID.BlockNumber),
+				zap.Error(err))
+			// Continue processing other logs
+		}
+	}
+
+	return nil
+}
+
+// processLog handles processing a single log entry
+func (w *Watcher) processLog(ctx context.Context, logger *zap.Logger, extLog ExtendedPublicLog) error {
+	// Log basic info
+	logger.Info("Log found",
+		zap.Int("block", extLog.ID.BlockNumber),
+		zap.String("contract", extLog.Log.ContractAddress))
+
+	// Skip empty logs
+	if len(extLog.Log.Log) == 0 {
+		return nil
+	}
+
+	// Extract event parameters
+	params, err := w.parseLogParameters(logger, extLog.Log.Log)
+	if err != nil {
+		return fmt.Errorf("failed to parse log parameters: %w", err)
+	}
+
+	// Create message payload
+	payload := w.createPayload(logger, extLog.Log.Log[4:])
+
+	// Get block info for transaction ID and timestamp
+	blockInfo, err := w.fetchBlockInfo(logger, extLog.ID.BlockNumber)
+	if err != nil {
+		logger.Warn("Failed to get block info, using defaults", zap.Error(err))
+		blockInfo = BlockInfo{
+			TxHash:    "0x0000000000000000000000000000000000000000000000000000000000000000",
+			Timestamp: uint64(time.Now().Unix()),
+		}
+	}
+
+	// Create and publish observation
+	return w.publishObservation(logger, params, payload, blockInfo)
+}
+
+// parseLogParameters extracts parameters from a log entry
+func (w *Watcher) parseLogParameters(logger *zap.Logger, logEntries []string) (LogParameters, error) {
+	if len(logEntries) < 4 {
+		return LogParameters{}, fmt.Errorf("log has insufficient entries: %d", len(logEntries))
+	}
+
+	// First value is the sender
+	sender := logEntries[0]
+	var senderAddress vaa.Address
+	copy(senderAddress[:], sender)
+	logger.Info("Sender", zap.String("value", sender))
+
+	// Parse sequence
+	sequence, err := hexToUint64(logEntries[1])
+	if err != nil {
+		return LogParameters{}, fmt.Errorf("failed to parse sequence: %w", err)
+	}
+	logger.Info("Sequence", zap.Uint64("value", sequence))
+
+	// Parse nonce
+	nonce, err := hexToUint64(logEntries[2])
+	if err != nil {
+		return LogParameters{}, fmt.Errorf("failed to parse nonce: %w", err)
+	}
+	logger.Info("Nonce", zap.Uint64("value", nonce))
+
+	// Parse consistency level
+	consistencyLevel, err := hexToUint64(logEntries[3])
+	if err != nil {
+		return LogParameters{}, fmt.Errorf("failed to parse consistencyLevel: %w", err)
+	}
+	logger.Info("ConsistencyLevel", zap.Uint64("value", consistencyLevel))
+
+	return LogParameters{
+		SenderAddress:    senderAddress,
+		Sequence:         sequence,
+		Nonce:            uint32(nonce),
+		ConsistencyLevel: uint8(consistencyLevel),
+	}, nil
+}
+
+// createPayload processes log entries into a byte payload
+func (w *Watcher) createPayload(logger *zap.Logger, logEntries []string) []byte {
+	payload := make([]byte, 0, PayloadInitialCap)
+
+	for i, entry := range logEntries {
+		hexStr := strings.TrimPrefix(entry, "0x")
+
+		// Try to decode as hex
+		bytes, err := hex.DecodeString(hexStr)
+		if err != nil {
+			logger.Warn("Failed to decode hex", zap.String("entry", entry), zap.Error(err))
+			continue
+		}
+
+		// Add to payload
+		payload = append(payload, bytes...)
+
+		// Try to interpret as a string for logging
+		w.logInterpretedValue(logger, i+4, bytes, entry)
+	}
+
+	return payload
+}
+
+// logInterpretedValue attempts to interpret bytes as string or number for logging
+func (w *Watcher) logInterpretedValue(logger *zap.Logger, index int, bytes []byte, rawHex string) {
+	// Trim leading null bytes
+	startIndex := 0
+	for startIndex < len(bytes) && bytes[startIndex] == 0 {
+		startIndex++
+	}
+	trimmedBytes := bytes[startIndex:]
+
+	// Check if it's a printable string
+	if str := string(trimmedBytes); isPrintableString(str) {
+		logger.Info("Field as string", zap.Int("index", index), zap.String("value", str))
+	} else {
+		// Fall back to numeric representation
+		logger.Info("Field as number", zap.Int("index", index), zap.String("value", rawHex))
+	}
+}
+
+// publishObservation creates and publishes a message observation
+func (w *Watcher) publishObservation(logger *zap.Logger, params LogParameters, payload []byte, blockInfo BlockInfo) error {
+	// Convert transaction hash to byte array for txID
+	txID, err := hex.DecodeString(strings.TrimPrefix(blockInfo.TxHash, "0x"))
+	if err != nil {
+		logger.Error("Failed to decode transaction hash", zap.Error(err))
+		// Fall back to default
+		txID = []byte{0x0}
+	}
+
+	// Create the observation
+	observation := &common.MessagePublication{
+		TxID:             txID,
+		Timestamp:        time.Unix(int64(blockInfo.Timestamp), 0),
+		Nonce:            params.Nonce,
+		Sequence:         params.Sequence,
+		EmitterChain:     w.chainID,
+		EmitterAddress:   params.SenderAddress,
+		Payload:          payload,
+		ConsistencyLevel: params.ConsistencyLevel,
+		IsReobservation:  false,
+	}
+
+	// Increment metrics
+	aztecMessagesConfirmed.WithLabelValues(w.networkID).Inc()
+
+	// Log the observation
+	logger.Info("Message observed",
+		zap.String("txHash", observation.TxIDString()),
+		zap.Time("timestamp", observation.Timestamp),
+		zap.Uint32("nonce", observation.Nonce),
+		zap.Uint64("sequence", observation.Sequence),
+		zap.Stringer("emitter_chain", observation.EmitterChain),
+		zap.Stringer("emitter_address", observation.EmitterAddress),
+		zap.Binary("payload", observation.Payload),
+		zap.Uint8("consistencyLevel", observation.ConsistencyLevel),
+	)
+
+	// Send to the message channel
+	w.msgC <- observation
+
+	return nil
+}
+
+// fetchPublicLogs retrieves logs for a specific block range
+func (w *Watcher) fetchPublicLogs(logger *zap.Logger, fromBlock, toBlock int) ([]ExtendedPublicLog, error) {
+	// Create log filter parameter
+	logFilter := map[string]any{
+		"fromBlock": fromBlock,
+		"toBlock":   toBlock,
+	}
+
+	payload := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "node_getPublicLogs",
+		"params":  []any{logFilter},
+		"id":      1,
+	}
+
+	// Send the JSON-RPC request
+	responseBody, err := w.sendJSONRPCRequest(logger, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the response
+	var response JsonRpcResponse
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse logs response: %w", err)
+	}
+
+	return response.Result.Logs, nil
+}
+
+// fetchLatestBlockNumber gets the current height of the blockchain
+func (w *Watcher) fetchLatestBlockNumber(logger *zap.Logger) (int, error) {
 	payload := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "node_getBlockNumber",
@@ -383,55 +430,228 @@ func getLatestBlockNumber(endpoint string) (int, error) {
 		"id":      1,
 	}
 
-	jsonData, err := json.Marshal(payload)
+	// Send the request
+	responseBody, err := w.sendJSONRPCRequest(logger, payload)
 	if err != nil {
 		return 0, err
 	}
 
-	resp, err := http.Post(endpoint, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, err
-	}
-
-	// Parse the response to get the block number
-	var result struct {
+	// Parse the response
+	var response struct {
 		Result json.RawMessage `json:"result"`
 	}
 
-	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, err
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return 0, fmt.Errorf("failed to parse block number response: %w", err)
 	}
 
-	// Check if the result is a string (hex) or a number
-	var blockNum int
+	return parseBlockNumber(response.Result)
+}
 
-	// Try to unmarshal as string first
+// fetchBlockInfo gets details of a specific block
+func (w *Watcher) fetchBlockInfo(logger *zap.Logger, blockNumber int) (BlockInfo, error) {
+	payload := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "node_getBlock",
+		"params":  []any{blockNumber},
+		"id":      1,
+	}
+
+	// Send the request
+	responseBody, err := w.sendJSONRPCRequest(logger, payload)
+	if err != nil {
+		return BlockInfo{}, err
+	}
+
+	// Parse the response
+	var response BlockResponse
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return BlockInfo{}, fmt.Errorf("failed to parse block response: %w", err)
+	}
+
+	// Extract the necessary information from the block
+	info := BlockInfo{}
+
+	// Get the timestamp from global variables (remove 0x prefix and convert from hex)
+	timestampHex := strings.TrimPrefix(response.Result.Header.GlobalVariables.Timestamp, "0x")
+	timestamp, err := strconv.ParseUint(timestampHex, 16, 64)
+	if err != nil {
+		return BlockInfo{}, fmt.Errorf("failed to parse timestamp: %w", err)
+	}
+	info.Timestamp = timestamp
+
+	// Get the transaction hash from the first transaction in the block (if available)
+	if len(response.Result.Body.TxEffects) > 0 {
+		info.TxHash = response.Result.Body.TxEffects[0].TxHash
+	} else {
+		// If no transactions, use the block's archive root as a fallback identifier
+		info.TxHash = response.Result.Archive.Root
+	}
+
+	return info, nil
+}
+
+// sendJSONRPCRequest sends a JSON-RPC request and returns the response body
+func (w *Watcher) sendJSONRPCRequest(logger *zap.Logger, payload map[string]any) ([]byte, error) {
+	// Marshal the payload
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling JSON: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequest("POST", w.rpcURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Send the request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	// Read the response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response: %w", err)
+	}
+
+	return body, nil
+}
+
+// parseBlockNumber handles different formats of block number in responses
+func parseBlockNumber(rawMessage json.RawMessage) (int, error) {
+	// Try to unmarshal as string first (hex format)
 	var hexStr string
-	if err := json.Unmarshal(result.Result, &hexStr); err == nil {
+	if err := json.Unmarshal(rawMessage, &hexStr); err == nil {
 		// It's a hex string like "0x123"
 		parsedNum, err := strconv.ParseInt(hexStr, 0, 64)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("failed to parse hex block number: %w", err)
 		}
-		blockNum = int(parsedNum)
-	} else {
-		// Try to unmarshal as number
-		var num float64
-		if err := json.Unmarshal(result.Result, &num); err != nil {
-			return 0, fmt.Errorf("result is neither string nor number: %v", err)
-		}
-		blockNum = int(num)
+		return int(parsedNum), nil
 	}
 
-	return blockNum, nil
+	// Try to unmarshal as number
+	var num float64
+	if err := json.Unmarshal(rawMessage, &num); err != nil {
+		return 0, fmt.Errorf("block number is neither string nor number: %w", err)
+	}
+
+	return int(num), nil
 }
 
-func processLogs(responseBody []byte, fromBlock, toBlock int, logger *zap.Logger) {
-	fmt.Println("SVLACHAKIS Response:", string(responseBody))
+// hexToUint64 converts a hex string to uint64
+func hexToUint64(hexStr string) (uint64, error) {
+	// Remove "0x" prefix if present
+	hexStr = strings.TrimPrefix(hexStr, "0x")
+
+	// Parse the hex string to uint64
+	value, err := strconv.ParseUint(hexStr, 16, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to convert hex to uint64: %s, error: %w", hexStr, err)
+	}
+
+	return value, nil
+}
+
+// isPrintableString checks if a string contains mostly printable ASCII characters
+func isPrintableString(s string) bool {
+	printable := 0
+	for _, r := range s {
+		if r >= 32 && r <= 126 {
+			printable++
+		}
+	}
+	return printable >= 3 && float64(printable)/float64(len(s)) > 0.5
+}
+
+// LogParameters encapsulates the core parameters from a log
+type LogParameters struct {
+	SenderAddress    vaa.Address
+	Sequence         uint64
+	Nonce            uint32
+	ConsistencyLevel uint8
+}
+
+// Helper struct for block information
+type BlockInfo struct {
+	TxHash    string
+	Timestamp uint64
+}
+
+// JSON-RPC related structures
+type JsonRpcResponse struct {
+	JsonRPC string `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Result  struct {
+		Logs       []ExtendedPublicLog `json:"logs"`
+		MaxLogsHit bool                `json:"maxLogsHit"`
+	} `json:"result"`
+}
+
+type BlockResponse struct {
+	JsonRPC string      `json:"jsonrpc"`
+	ID      int         `json:"id"`
+	Result  BlockResult `json:"result"`
+}
+
+type BlockResult struct {
+	Archive BlockArchive `json:"archive"`
+	Header  BlockHeader  `json:"header"`
+	Body    BlockBody    `json:"body"`
+}
+
+type BlockArchive struct {
+	Root                   string `json:"root"`
+	NextAvailableLeafIndex int    `json:"nextAvailableLeafIndex"`
+}
+
+type BlockHeader struct {
+	GlobalVariables GlobalVariables `json:"globalVariables"`
+	// Other header fields omitted for brevity
+}
+
+type GlobalVariables struct {
+	ChainID     string `json:"chainId"`
+	Version     string `json:"version"`
+	BlockNumber string `json:"blockNumber"`
+	SlotNumber  string `json:"slotNumber"`
+	Timestamp   string `json:"timestamp"`
+	Coinbase    string `json:"coinbase"`
+	// Other global variables omitted for brevity
+}
+
+type BlockBody struct {
+	TxEffects []TxEffect `json:"txEffects"`
+}
+
+type TxEffect struct {
+	TxHash string `json:"txHash"`
+	// Other tx effect fields omitted for brevity
+}
+
+type LogId struct {
+	BlockNumber int `json:"blockNumber"`
+	TxIndex     int `json:"txIndex"`
+	LogIndex    int `json:"logIndex"`
+}
+
+type PublicLog struct {
+	ContractAddress string   `json:"contractAddress"`
+	Log             []string `json:"log"`
+}
+
+type ExtendedPublicLog struct {
+	ID  LogId     `json:"id"`
+	Log PublicLog `json:"log"`
 }
