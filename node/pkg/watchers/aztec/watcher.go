@@ -248,7 +248,7 @@ func (w *Watcher) processLog(ctx context.Context, logger *zap.Logger, extLog Ext
 	payload := w.createPayload(logger, extLog.Log.Log[4:])
 
 	// Get block info for transaction ID and timestamp
-	blockInfo, err := w.fetchBlockInfo(ctx, logger, extLog.ID.BlockNumber)
+	blockInfo, err := w.fetchBlockInfo(ctx, extLog.ID.BlockNumber)
 	if err != nil {
 		logger.Warn("Failed to get block info, using defaults", zap.Error(err))
 		blockInfo = BlockInfo{
@@ -404,7 +404,7 @@ func (w *Watcher) fetchPublicLogs(ctx context.Context, logger *zap.Logger, fromB
 	}
 
 	// Send the JSON-RPC request
-	responseBody, err := w.sendJSONRPCRequest(ctx, logger, payload)
+	responseBody, err := w.sendJSONRPCRequest(ctx, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +428,7 @@ func (w *Watcher) fetchLatestBlockNumber(ctx context.Context, logger *zap.Logger
 	}
 
 	// Send the request
-	responseBody, err := w.sendJSONRPCRequest(ctx, logger, payload)
+	responseBody, err := w.sendJSONRPCRequest(ctx, payload)
 	if err != nil {
 		return 0, err
 	}
@@ -446,7 +446,7 @@ func (w *Watcher) fetchLatestBlockNumber(ctx context.Context, logger *zap.Logger
 }
 
 // fetchBlockInfo gets details of a specific block
-func (w *Watcher) fetchBlockInfo(ctx context.Context, logger *zap.Logger, blockNumber int) (BlockInfo, error) {
+func (w *Watcher) fetchBlockInfo(ctx context.Context, blockNumber int) (BlockInfo, error) {
 	payload := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "node_getBlock",
@@ -455,7 +455,7 @@ func (w *Watcher) fetchBlockInfo(ctx context.Context, logger *zap.Logger, blockN
 	}
 
 	// Send the request
-	responseBody, err := w.sendJSONRPCRequest(ctx, logger, payload)
+	responseBody, err := w.sendJSONRPCRequest(ctx, payload)
 	if err != nil {
 		return BlockInfo{}, err
 	}
@@ -489,7 +489,7 @@ func (w *Watcher) fetchBlockInfo(ctx context.Context, logger *zap.Logger, blockN
 }
 
 // sendJSONRPCRequest sends a JSON-RPC request and returns the response body
-func (w *Watcher) sendJSONRPCRequest(ctx context.Context, logger *zap.Logger, payload map[string]any) ([]byte, error) {
+func (w *Watcher) sendJSONRPCRequest(ctx context.Context, payload map[string]any) ([]byte, error) {
 	// Marshal the payload
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
