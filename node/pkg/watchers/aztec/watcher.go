@@ -26,15 +26,14 @@ import (
 // Configuration constants
 const (
 	// Time intervals
-	BlockPollingInterval  = 1 * time.Second
-	LogProcessingInterval = 10 * time.Second
+	logProcessingInterval = 10 * time.Second
 
 	// Processing parameters
-	DefaultBatchSize  = 1
-	PayloadInitialCap = 13
+	defaultBatchSize  = 1
+	payloadInitialCap = 13
 
 	// Default starting block
-	DefaultStartBlock = 0
+	defaultStartBlock = 0
 )
 
 // Watcher monitors the Aztec blockchain for message publications
@@ -82,7 +81,7 @@ func NewWatcher(
 		msgC:               msgC,
 		obsvReqC:           obsvReqC,
 		readinessSync:      common.MustConvertChainIdToReadinessSyncing(chainID),
-		lastProcessedBlock: DefaultStartBlock,
+		lastProcessedBlock: defaultStartBlock,
 	}
 }
 
@@ -119,7 +118,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 			default:
 				// Wait before processing more blocks
-				time.Sleep(LogProcessingInterval)
+				time.Sleep(logProcessingInterval)
 
 				// Check for and process new blocks
 				if err := w.fetchAndProcessBlocks(ctx, logger); err != nil {
@@ -145,7 +144,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 // fetchAndProcessBlocks checks for new blocks and processes them if found
 func (w *Watcher) fetchAndProcessBlocks(ctx context.Context, logger *zap.Logger) error {
 	// Get the latest block number
-	latestBlock, err := w.fetchLatestBlockNumber(logger)
+	latestBlock, err := w.fetchLatestBlockNumber(ctx, logger)
 	if err != nil {
 		return fmt.Errorf("error getting latest block: %w", err)
 	}
@@ -160,21 +159,19 @@ func (w *Watcher) fetchAndProcessBlocks(ctx context.Context, logger *zap.Logger)
 
 	// Log that we found new blocks to process
 	logger.Info("Processing new blocks",
-		zap.Int("from", w.lastProcessedBlock+1),
-		zap.Int("to", latestBlock))
+		zap.Int("from", w.lastProcessedBlock),
+		zap.Int("to", latestBlock+1))
 
 	// Process blocks in batches
-	return w.processBlockRange(ctx, logger, w.lastProcessedBlock+1, latestBlock)
+	return w.processBlockRange(ctx, logger, w.lastProcessedBlock, latestBlock+1)
 }
 
 // processBlockRange processes a range of blocks in batches
 func (w *Watcher) processBlockRange(ctx context.Context, logger *zap.Logger, startBlock, endBlock int) error {
-	for fromBlock := startBlock; fromBlock <= endBlock; fromBlock += DefaultBatchSize {
+	for fromBlock := startBlock; fromBlock <= endBlock; fromBlock += defaultBatchSize {
 		// Calculate the end of this batch
-		toBlock := fromBlock + DefaultBatchSize - 1
-		if toBlock > endBlock {
-			toBlock = endBlock
-		}
+
+		toBlock := min(fromBlock+defaultBatchSize-1, endBlock)
 
 		// Handle quirk for single block ranges (Aztec specific)
 		if fromBlock == toBlock {
@@ -206,7 +203,7 @@ func (w *Watcher) processBatch(ctx context.Context, logger *zap.Logger, fromBloc
 		zap.Int("toBlock", toBlock))
 
 	// Get logs for this block range
-	logs, err := w.fetchPublicLogs(logger, fromBlock, toBlock)
+	logs, err := w.fetchPublicLogs(ctx, logger, fromBlock, toBlock)
 	if err != nil {
 		return fmt.Errorf("failed to fetch logs: %w", err)
 	}
@@ -251,7 +248,7 @@ func (w *Watcher) processLog(ctx context.Context, logger *zap.Logger, extLog Ext
 	payload := w.createPayload(logger, extLog.Log.Log[4:])
 
 	// Get block info for transaction ID and timestamp
-	blockInfo, err := w.fetchBlockInfo(logger, extLog.ID.BlockNumber)
+	blockInfo, err := w.fetchBlockInfo(ctx, logger, extLog.ID.BlockNumber)
 	if err != nil {
 		logger.Warn("Failed to get block info, using defaults", zap.Error(err))
 		blockInfo = BlockInfo{
@@ -307,7 +304,7 @@ func (w *Watcher) parseLogParameters(logger *zap.Logger, logEntries []string) (L
 
 // createPayload processes log entries into a byte payload
 func (w *Watcher) createPayload(logger *zap.Logger, logEntries []string) []byte {
-	payload := make([]byte, 0, PayloadInitialCap)
+	payload := make([]byte, 0, payloadInitialCap)
 
 	for i, entry := range logEntries {
 		hexStr := strings.TrimPrefix(entry, "0x")
@@ -392,7 +389,7 @@ func (w *Watcher) publishObservation(logger *zap.Logger, params LogParameters, p
 }
 
 // fetchPublicLogs retrieves logs for a specific block range
-func (w *Watcher) fetchPublicLogs(logger *zap.Logger, fromBlock, toBlock int) ([]ExtendedPublicLog, error) {
+func (w *Watcher) fetchPublicLogs(ctx context.Context, logger *zap.Logger, fromBlock, toBlock int) ([]ExtendedPublicLog, error) {
 	// Create log filter parameter
 	logFilter := map[string]any{
 		"fromBlock": fromBlock,
@@ -407,7 +404,7 @@ func (w *Watcher) fetchPublicLogs(logger *zap.Logger, fromBlock, toBlock int) ([
 	}
 
 	// Send the JSON-RPC request
-	responseBody, err := w.sendJSONRPCRequest(logger, payload)
+	responseBody, err := w.sendJSONRPCRequest(ctx, logger, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +419,7 @@ func (w *Watcher) fetchPublicLogs(logger *zap.Logger, fromBlock, toBlock int) ([
 }
 
 // fetchLatestBlockNumber gets the current height of the blockchain
-func (w *Watcher) fetchLatestBlockNumber(logger *zap.Logger) (int, error) {
+func (w *Watcher) fetchLatestBlockNumber(ctx context.Context, logger *zap.Logger) (int, error) {
 	payload := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "node_getBlockNumber",
@@ -431,7 +428,7 @@ func (w *Watcher) fetchLatestBlockNumber(logger *zap.Logger) (int, error) {
 	}
 
 	// Send the request
-	responseBody, err := w.sendJSONRPCRequest(logger, payload)
+	responseBody, err := w.sendJSONRPCRequest(ctx, logger, payload)
 	if err != nil {
 		return 0, err
 	}
@@ -449,7 +446,7 @@ func (w *Watcher) fetchLatestBlockNumber(logger *zap.Logger) (int, error) {
 }
 
 // fetchBlockInfo gets details of a specific block
-func (w *Watcher) fetchBlockInfo(logger *zap.Logger, blockNumber int) (BlockInfo, error) {
+func (w *Watcher) fetchBlockInfo(ctx context.Context, logger *zap.Logger, blockNumber int) (BlockInfo, error) {
 	payload := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "node_getBlock",
@@ -458,7 +455,7 @@ func (w *Watcher) fetchBlockInfo(logger *zap.Logger, blockNumber int) (BlockInfo
 	}
 
 	// Send the request
-	responseBody, err := w.sendJSONRPCRequest(logger, payload)
+	responseBody, err := w.sendJSONRPCRequest(ctx, logger, payload)
 	if err != nil {
 		return BlockInfo{}, err
 	}
@@ -492,7 +489,7 @@ func (w *Watcher) fetchBlockInfo(logger *zap.Logger, blockNumber int) (BlockInfo
 }
 
 // sendJSONRPCRequest sends a JSON-RPC request and returns the response body
-func (w *Watcher) sendJSONRPCRequest(logger *zap.Logger, payload map[string]any) ([]byte, error) {
+func (w *Watcher) sendJSONRPCRequest(ctx context.Context, logger *zap.Logger, payload map[string]any) ([]byte, error) {
 	// Marshal the payload
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
@@ -500,7 +497,7 @@ func (w *Watcher) sendJSONRPCRequest(logger *zap.Logger, payload map[string]any)
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequest("POST", w.rpcURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", w.rpcURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
 	}
