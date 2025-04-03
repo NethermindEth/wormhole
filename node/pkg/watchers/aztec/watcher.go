@@ -144,7 +144,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 // fetchAndProcessBlocks checks for new blocks and processes them if found
 func (w *Watcher) fetchAndProcessBlocks(ctx context.Context, logger *zap.Logger) error {
 	// Get the latest block number
-	latestBlock, err := w.fetchLatestBlockNumber(ctx, logger)
+	latestBlock, err := w.fetchLatestBlockNumber(ctx)
 	if err != nil {
 		return fmt.Errorf("error getting latest block: %w", err)
 	}
@@ -203,7 +203,7 @@ func (w *Watcher) processBatch(ctx context.Context, logger *zap.Logger, fromBloc
 		zap.Int("toBlock", toBlock))
 
 	// Get logs for this block range
-	logs, err := w.fetchPublicLogs(ctx, logger, fromBlock, toBlock)
+	logs, err := w.fetchPublicLogs(ctx, fromBlock, toBlock)
 	if err != nil {
 		return fmt.Errorf("failed to fetch logs: %w", err)
 	}
@@ -389,7 +389,7 @@ func (w *Watcher) publishObservation(logger *zap.Logger, params LogParameters, p
 }
 
 // fetchPublicLogs retrieves logs for a specific block range
-func (w *Watcher) fetchPublicLogs(ctx context.Context, logger *zap.Logger, fromBlock, toBlock int) ([]ExtendedPublicLog, error) {
+func (w *Watcher) fetchPublicLogs(ctx context.Context, fromBlock, toBlock int) ([]ExtendedPublicLog, error) {
 	// Create log filter parameter
 	logFilter := map[string]any{
 		"fromBlock": fromBlock,
@@ -419,7 +419,7 @@ func (w *Watcher) fetchPublicLogs(ctx context.Context, logger *zap.Logger, fromB
 }
 
 // fetchLatestBlockNumber gets the current height of the blockchain
-func (w *Watcher) fetchLatestBlockNumber(ctx context.Context, logger *zap.Logger) (int, error) {
+func (w *Watcher) fetchLatestBlockNumber(ctx context.Context) (int, error) {
 	payload := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "node_getBlockNumber",
