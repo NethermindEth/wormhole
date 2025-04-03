@@ -387,7 +387,7 @@ func init() {
 	aptosAccount = NodeCmd.Flags().String("aptosAccount", "", "aptos account")
 	aptosHandle = NodeCmd.Flags().String("aptosHandle", "", "aptos handle")
 
-	aztecRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "aztecRPC", "Aztec RPC URL", "http://172.20.10.2:8080", []string{"http", "https"})
+	aztecRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "aztecRPC", "Aztec RPC URL", "", []string{"http", "https"})
 	aztecContract = NodeCmd.Flags().String("aztecContract", "", "aztec contract")
 
 	movementRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "movementRPC", "Movement RPC URL", "", []string{"http", "https"})
