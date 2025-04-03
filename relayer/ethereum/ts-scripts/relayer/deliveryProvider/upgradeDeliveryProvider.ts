@@ -31,7 +31,7 @@ async function run() {
 }
 
 async function upgradeDeliveryProvider(chain: ChainInfo, newImpl: Deployment) {
-  console.log("About to upgrade relay provider for chain " + chain.chainId);
+  console.log("About to upgrade relay provider for chain " + chain.chainId + " with evmNetworkId " + chain.evmNetworkId + " and with rpc " + chain.rpc + " and with wormholeAddress " + chain.wormholeAddress);
   const provider = getDeliveryProvider(chain);
   const tx = await provider.upgrade(chain.chainId, newImpl.address);
   await tx.wait();

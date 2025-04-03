@@ -12,7 +12,7 @@ const { PXE_URL = 'http://localhost:8080' } = process.env;
 
 async function main() {
   const pxe = createPXEClient(PXE_URL);
-  await waitForPXE(pxe);
+  await pxe.getNodeInfo();
 
   const [ownerWallet] = await getInitialTestAccountsWallets(pxe);
   const ownerAddress = ownerWallet.getAddress();

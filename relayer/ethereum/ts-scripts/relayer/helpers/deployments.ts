@@ -21,7 +21,7 @@ export const proxyContractSalt = Buffer.from("0xGenericRelayer");
 export async function deployDeliveryProviderImplementation(
   chain: ChainInfo
 ): Promise<Deployment> {
-  console.log("deployDeliveryProviderImplementation " + chain.chainId);
+  console.log("deployDeliveryProviderImplementation for chain " + chain.chainId + " with evmNetworkId " + chain.evmNetworkId + " and with rpc " + chain.rpc + " and with wormholeAddress " + chain.wormholeAddress);
   const signer = getSigner(chain);
 
   const contractInterface = DeliveryProviderImplementation__factory.createInterface();
