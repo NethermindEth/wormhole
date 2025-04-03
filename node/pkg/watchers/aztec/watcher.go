@@ -125,9 +125,6 @@ func (w *Watcher) Run(ctx context.Context) error {
 					logger.Error("Error processing blocks", zap.Error(err))
 					// Continue instead of returning to maintain service
 				}
-
-				// Signal readiness
-				readiness.SetReady(w.readinessSync)
 			}
 		}
 	})
