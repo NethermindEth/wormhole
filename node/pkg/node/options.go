@@ -54,6 +54,7 @@ func GuardianOptionP2P(
 	ibcFeaturesFunc func() string,
 	protectedPeers []string,
 	ccqProtectedPeers []string,
+	featureFlags []string,
 ) *GuardianOption {
 	return &GuardianOption{
 		name:         "p2p",
@@ -106,6 +107,7 @@ func GuardianOptionP2P(
 					ccqAllowedPeers,
 					protectedPeers,
 					ccqProtectedPeers,
+					featureFlags,
 				),
 				p2p.WithProcessorFeaturesFunc(processor.GetFeatures),
 			)
@@ -309,7 +311,8 @@ func GuardianOptionStatusServer(statusAddr string) *GuardianOption {
 					logger.Info("status server listening", zap.String("status_addr", statusAddr))
 
 					<-ctx.Done()
-					if err := server.Shutdown(context.Background()); err != nil { // We use context.Background() instead of ctx here because ctx is already canceled at this point and Shutdown would not work then.
+					//nolint:contextcheck // We use context.Background() instead of ctx here because ctx is already canceled at this point and Shutdown would not work then.
+					if err := server.Shutdown(context.Background()); err != nil {
 						logger := supervisor.Logger(ctx)
 						logger.Error("error while shutting down status server: ", zap.Error(err))
 					}
@@ -327,7 +330,7 @@ type IbcWatcherConfig struct {
 	Contract       string
 }
 
-// GuardianOptionWatchers configues all normal watchers and all IBC watchers. They need to be all configured at the same time because they may depend on each other.
+// GuardianOptionWatchers configures all normal watchers and all IBC watchers. They need to be all configured at the same time because they may depend on each other.
 // TODO: currently, IBC watchers are partially statically configured in ibc.ChainConfig. It might make sense to refactor this to instead provide this as a parameter here.
 // Dependencies: none
 func GuardianOptionWatchers(watcherConfigs []watchers.WatcherConfig, ibcWatcherConfig *IbcWatcherConfig) *GuardianOption {
@@ -429,7 +432,7 @@ func GuardianOptionWatchers(watcherConfigs []watchers.WatcherConfig, ibcWatcherC
 				watcherName := string(wc.GetNetworkID()) + "_watch"
 				logger.Debug("Setting up watcher: " + watcherName)
 
-				if wc.GetNetworkID() != "solana-confirmed" { // TODO this should not be a special case, see comment in common/readiness.go
+				if wc.GetNetworkID() != "solana-confirmed" && wc.GetNetworkID() != "fogo-confirmed" { // TODO this should not be a special case, see comment in common/readiness.go
 					common.MustRegisterReadinessSyncing(wc.GetChainID())
 					chainObsvReqC[wc.GetChainID()] = make(chan *gossipv1.ObservationRequest, observationRequestPerChainBufferSize)
 					g.chainQueryReqC[wc.GetChainID()] = make(chan *query.PerChainQueryInternal, query.QueryRequestBufferSize)
@@ -505,6 +508,7 @@ func GuardianOptionAdminService(socketPath string, ethRpc *string, ethContract *
 		name:         "admin-service",
 		dependencies: []string{"governor", "db"},
 		f: func(ctx context.Context, logger *zap.Logger, g *G) error {
+			//nolint:contextcheck // Independent service that should not be affected by other services
 			adminService, err := adminServiceRunnable(
 				logger,
 				socketPath,
@@ -537,11 +541,11 @@ func GuardianOptionPublicRpcSocket(publicGRPCSocketPath string, publicRpcLogDeta
 		dependencies: []string{"db", "governor"},
 		f: func(ctx context.Context, logger *zap.Logger, g *G) error {
 			// local public grpc service socket
+			//nolint:contextcheck // We use context.Background() instead of ctx here because ctx is already canceled at this point and Shutdown would not work then.
 			publicrpcUnixService, publicrpcServer, err := publicrpcUnixServiceRunnable(logger, publicGRPCSocketPath, publicRpcLogDetail, g.db, g.gst, g.gov)
 			if err != nil {
 				return fmt.Errorf("failed to create publicrpc service: %w", err)
 			}
-
 			g.runnables["publicrpcsocket"] = publicrpcUnixService
 			g.publicrpcServer = publicrpcServer
 			return nil

@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
 
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 
 	"github.com/certusone/wormhole/node/pkg/common"
@@ -18,6 +20,7 @@ import (
 	"github.com/certusone/wormhole/node/pkg/query"
 	"github.com/certusone/wormhole/node/pkg/readiness"
 	"github.com/certusone/wormhole/node/pkg/supervisor"
+	"github.com/certusone/wormhole/node/pkg/watchers"
 	eth_common "github.com/ethereum/go-ethereum/common"
 	"github.com/gagliardetto/solana-go"
 	lookup "github.com/gagliardetto/solana-go/programs/address-lookup-table"
@@ -141,6 +144,12 @@ const (
 
 	// SolanaSignatureLen is the expected length of a signature. As of v1.12.0, solana-go does not have a const for this.
 	SolanaSignatureLen = 64
+
+	// DefaultPollDelay is the polling interval used for any chains that don't have an override.
+	DefaultPollDelay = time.Second * 1
+
+	// FogoPollDelay is the polling interval for Fogo. It has a very short block time so we want to poll more frequently.
+	FogoPollDelay = time.Millisecond * 200
 )
 
 var (
@@ -268,15 +277,15 @@ func NewSolanaWatcher(
 	}
 }
 
-func (s *SolanaWatcher) SetupSubscription(ctx context.Context) (error, *websocket.Conn) {
+func (s *SolanaWatcher) SetupSubscription(ctx context.Context) (*websocket.Conn, error) {
 	logger := supervisor.Logger(ctx)
 
-	logger.Info("Solana watcher connecting to WS node ", zap.String("url", *s.wsUrl))
+	logger.Info(fmt.Sprintf("%s watcher connecting to WS node ", s.chainID.String()), zap.String("url", *s.wsUrl))
 
 	ws, _, err := websocket.Dial(ctx, *s.wsUrl, nil)
 
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
 	s.subId = uuid.New().String()
@@ -290,9 +299,9 @@ func (s *SolanaWatcher) SetupSubscription(ctx context.Context) (error, *websocke
 
 	if err := ws.Write(ctx, websocket.MessageText, []byte(p)); err != nil {
 		logger.Error(fmt.Sprintf("write: %s", err.Error()))
-		return err, nil
+		return nil, err
 	}
-	return nil, ws
+	return ws, nil
 }
 
 func (s *SolanaWatcher) SetupWebSocket(ctx context.Context) error {
@@ -302,7 +311,7 @@ func (s *SolanaWatcher) SetupWebSocket(ctx context.Context) error {
 
 	logger := supervisor.Logger(ctx)
 
-	err, ws := s.SetupSubscription(ctx)
+	ws, err := s.SetupSubscription(ctx)
 	if err != nil {
 		return err
 	}
@@ -362,16 +371,20 @@ func (s *SolanaWatcher) Run(ctx context.Context) error {
 		wsUrl = *s.wsUrl
 	}
 
+	pollInterval := DefaultPollDelay
+	if s.chainID == vaa.ChainIDFogo {
+		pollInterval = FogoPollDelay
+	}
+
 	logger.Info("Starting watcher",
-		zap.String("watcher_name", "solana"),
+		zap.String("watcher_name", s.chainID.String()),
 		zap.String("rpcUrl", s.rpcUrl),
 		zap.String("wsUrl", wsUrl),
 		zap.String("contract", contractAddr),
 		zap.String("rawContract", s.rawContract),
 		zap.String("shimContract", s.shimContractStr),
+		zap.Duration("pollInterval", pollInterval),
 	)
-
-	logger.Info("Solana watcher connecting to RPC node ", zap.String("url", s.rpcUrl))
 
 	s.shimSetup()
 
@@ -388,7 +401,7 @@ func (s *SolanaWatcher) Run(ctx context.Context) error {
 	}
 
 	common.RunWithScissors(ctx, s.errC, "SolanaWatcher", func(ctx context.Context) error {
-		timer := time.NewTicker(time.Second * 1)
+		timer := time.NewTicker(pollInterval)
 		defer timer.Stop()
 
 		for {
@@ -404,6 +417,15 @@ func (s *SolanaWatcher) Run(ctx context.Context) error {
 					return err
 				}
 			case m := <-s.obsvReqC:
+				if m.ChainId > math.MaxUint16 {
+					logger.Error("chain id for observation request is not a valid uint16",
+						zap.Uint32("chainID", m.ChainId),
+						zap.String("txID", hex.EncodeToString(m.TxHash)),
+					)
+					continue
+				}
+
+				//nolint:contextcheck // Passed via the 's' object instead of as a parameter.
 				numObservations, err := s.handleReobservationRequest(vaa.ChainID(m.ChainId), m.TxHash, s.rpcClient)
 				if err != nil {
 					logger.Error("failed to process observation request",
@@ -439,7 +461,7 @@ func (s *SolanaWatcher) Run(ctx context.Context) error {
 				currentSolanaHeight.WithLabelValues(s.networkName, string(s.commitment)).Set(float64(slot))
 				readiness.SetReady(s.readinessSync)
 				p2p.DefaultRegistry.SetNetworkStats(s.chainID, &gossipv1.Heartbeat_Network{
-					Height:          int64(slot),
+					Height:          int64(slot), // #nosec G115 -- This conversion is safe indefinitely
 					ContractAddress: contractAddr,
 				})
 
@@ -653,10 +675,10 @@ func (s *SolanaWatcher) processTransaction(ctx context.Context, rpcClient *rpc.C
 	var shimFound bool
 	for n, key := range tx.Message.AccountKeys {
 		if key.Equals(s.contract) {
-			programIndex = uint16(n)
+			programIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 		}
 		if s.shimEnabled && key.Equals(s.shimContractAddr) {
-			shimProgramIndex = uint16(n)
+			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 			shimFound = true
 		}
 	}
@@ -1062,6 +1084,9 @@ func (s *SolanaWatcher) processMessageAccount(logger *zap.Logger, data []byte, a
 	}
 
 	solanaMessagesConfirmed.WithLabelValues(s.networkName).Inc()
+	if isReobservation {
+		watchers.ReobservationsByChain.WithLabelValues(s.chainID.String(), "std").Inc()
+	}
 
 	if logger.Level().Enabled(s.msgObservedLogLevel) {
 		logger.Log(s.msgObservedLogLevel, "message observed",

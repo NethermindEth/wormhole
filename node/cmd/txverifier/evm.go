@@ -117,6 +117,7 @@ func runTransferVerifierEvm(cmd *cobra.Command, args []string) {
 
 	// Create main configuration for Transfer Verification
 	transferVerifier, err := txverifier.NewTransferVerifier(
+		ctx,
 		evmConnector,
 		&txverifier.TVAddresses{
 			CoreBridgeAddr:    common.HexToAddress(*evmCoreContract),
@@ -151,7 +152,7 @@ func runTransferVerifierEvm(cmd *cobra.Command, args []string) {
 
 		// Process observed LogMessagePublished events
 		case vLog := <-sub.Events():
-			transferVerifier.ProcessEvent(ctx, vLog, nil)
+			transferVerifier.ProcessEvent(ctx, vLog.Raw.TxHash, nil)
 		}
 	}
 }
