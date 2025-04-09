@@ -157,10 +157,10 @@ func (w *Watcher) fetchAndProcessBlocks(ctx context.Context, logger *zap.Logger)
 	// Log that we found new blocks to process
 	logger.Info("Processing new blocks",
 		zap.Int("from", w.lastProcessedBlock),
-		zap.Int("to", latestBlock+1))
+		zap.Int("to", latestBlock))
 
 	// Process blocks in batches
-	return w.processBlockRange(ctx, logger, w.lastProcessedBlock, latestBlock+1)
+	return w.processBlockRange(ctx, logger, w.lastProcessedBlock, latestBlock)
 }
 
 // processBlockRange processes a range of blocks in batches

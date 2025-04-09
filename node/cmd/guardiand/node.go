@@ -929,6 +929,10 @@ func runNode(cmd *cobra.Command, args []string) {
 		logger.Fatal("If coinGeckoApiKey is set, then chainGovernorEnabled must be set")
 	}
 
+	if !argsConsistent([]string{*aztecRPC, *aztecContract}) {
+		logger.Fatal("Either --aztecRPC and --aztecContract must all be set or all unset")
+	}
+
 	var publicRpcLogDetail common.GrpcLogDetail
 	switch *publicRpcLogDetailStr {
 	case "none":
