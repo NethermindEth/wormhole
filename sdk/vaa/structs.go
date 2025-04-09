@@ -664,7 +664,7 @@ const (
 	ChainIDMezo ChainID = 50
 	// ChainIDFogo is the ChainID of Fogo
 	ChainIDFogo ChainID = 51
-	// ChainIdAztec is the ChainID of Aztec
+	// ChainIDAztec is the ChainID of Aztec
 	ChainIDAztec ChainID = 52
 	//ChainIDWormchain is the ChainID of Wormchain
 	// Wormchain is in it's own range.
