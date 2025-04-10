@@ -231,7 +231,7 @@ def build_node_yaml():
             if aztec:
                 container["command"] += [
                     "--aztecRPC",
-                    "",
+                    "http://aztec-sandbox:8090",
                     "--aztecContract",
                     "de0036a9600559e295d5f6802ef6f3f802f510366e0c23912b0655d972166017",
                 ]
@@ -378,7 +378,7 @@ if algorand:
 if aptos:
     guardian_resource_deps = guardian_resource_deps + ["aptos"]
 if aztec:
-    guardian_resource_deps = guardian_resource_deps + ["aztec"]
+    guardian_resource_deps = guardian_resource_deps + ["aztec-sandbox"]
 if wormchain:
     guardian_resource_deps = guardian_resource_deps + ["wormchain", "wormchain-deploy"]
 if sui:
@@ -974,6 +974,17 @@ if aptos:
             port_forward(8081, name = "Faucet [:8081]", host = webHost),
         ],
         labels = ["aptos"],
+        trigger_mode = trigger_mode,
+    )
+
+if aztec:
+    k8s_yaml_with_ns("devnet/aztec-devnet.yaml")
+    k8s_resource(
+        "aztec-sandbox",
+        port_forwards = [
+            port_forward(8090, name = "RPC [:8090]", host = webHost)
+        ],
+        labels = ["aztec-sandbox"],
         trigger_mode = trigger_mode,
     )
 
