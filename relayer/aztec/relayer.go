@@ -286,20 +286,41 @@ func (r *Relayer) processVAA(ctx context.Context, vaaBytes []byte) {
 
 // defaultVAAProcessor is the default VAA processing logic
 func defaultVAAProcessor(r *Relayer, vaaData *VAAData) error {
-	log.Println("[Processor] Verifying VAA...")
+	// Check if this is a VAA from the source chain (chain ID 52)
+	if vaaData.ChainID == r.config.SourceChainID {
+		log.Printf("[Processor] Processing VAA %d from source chain %d",
+			vaaData.Sequence, vaaData.ChainID)
 
-	// Verify the VAA on the destination chain
-	isValid, err := r.evmClient.parseAndVerifyVM(context.Background(), r.config.TargetContract, vaaData.RawBytes)
-	if err != nil {
-		return fmt.Errorf("Verification failed: %w", err)
+		// The original verification logic for source chain
+		log.Println("[Processor] Verifying VAA...")
+		isValid, err := r.evmClient.parseAndVerifyVM(context.Background(), r.config.TargetContract, vaaData.RawBytes)
+		if err != nil {
+			return fmt.Errorf("Verification failed: %w", err)
+		}
+
+		if isValid {
+			log.Printf("[Processor] ✅ VAA with sequence %d is valid", vaaData.Sequence)
+		} else {
+			log.Printf("[Processor] ❌ VAA with sequence %d is invalid", vaaData.Sequence)
+		}
+
+		return nil
 	}
 
-	if isValid {
-		log.Printf("[Processor] ✅ VAA %d is valid", vaaData.Sequence)
-	} else {
-		log.Printf("[Processor] ❌ VAA %d is invalid", vaaData.Sequence)
+	// Check if this is a VAA for the destination chain (chain ID 52)
+	if vaaData.ChainID == r.config.DestChainID && r.config.DestChainID == 52 {
+		log.Printf("[Processor] Processing VAA %d for destination chain %d",
+			vaaData.Sequence, vaaData.ChainID)
+
+		log.Println("[Processor] Executing destination chain logic...")
+		// svlachakis: Implement your destination-specific processing here
+
+		return nil
 	}
 
+	// If neither source nor destination match our criteria, skip this VAA
+	log.Printf("[Processor] ⚠️ Skipping VAA %d from chain %d (not configured for processing)",
+		vaaData.Sequence, vaaData.ChainID)
 	return nil
 }
 
