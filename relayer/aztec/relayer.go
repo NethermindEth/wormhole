@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,6 +34,7 @@ type Config struct {
 	WormholeContract string
 	TargetContract   string
 	EmitterAddress   string
+	vaaProcessor     func(*Relayer, *VAAData) error
 }
 
 // NewConfigFromEnv creates a Config from environment variables
@@ -83,10 +85,35 @@ func (c *SpyClient) Close() {
 	}
 }
 
-// SubscribeSignedVAA subscribes to all signed VAAs
+// SubscribeSignedVAA subscribes to all signed VAAs with retry logic
 func (c *SpyClient) SubscribeSignedVAA(ctx context.Context) (spyv1.SpyRPCService_SubscribeSignedVAAClient, error) {
+	const maxRetries = 5
+	const retryDelay = 2 * time.Second
+
 	log.Println("[SpyClient] Subscribing to signed VAAs...")
-	return c.client.SubscribeSignedVAA(ctx, &spyv1.SubscribeSignedVAARequest{})
+
+	var stream spyv1.SpyRPCService_SubscribeSignedVAAClient
+	var err error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		stream, err = c.client.SubscribeSignedVAA(ctx, &spyv1.SubscribeSignedVAARequest{})
+		if err == nil {
+			return stream, nil
+		}
+
+		if attempt < maxRetries {
+			log.Printf("[SpyClient] Subscribe attempt %d failed: %v. Retrying in %v...",
+				attempt, err, retryDelay)
+			select {
+			case <-time.After(retryDelay):
+				// Continue to next retry
+			case <-ctx.Done():
+				return nil, fmt.Errorf("subscribe to signed VAAs: %v", ctx.Err())
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("subscribe to signed VAAs after %d attempts: %v", maxRetries, err)
 }
 
 // EVMClient handles interactions with EVM-compatible blockchains
@@ -203,13 +230,16 @@ func NewRelayer(config Config) (*Relayer, error) {
 	}
 
 	relayer := &Relayer{
-		spyClient: spyClient,
-		evmClient: evmClient,
-		config:    config,
+		spyClient:    spyClient,
+		evmClient:    evmClient,
+		config:       config,
+		vaaProcessor: config.vaaProcessor,
 	}
 
 	// Set default VAA processor
-	relayer.vaaProcessor = defaultVAAProcessor
+	if relayer.vaaProcessor == nil {
+		relayer.vaaProcessor = defaultVAAProcessor
+	}
 
 	return relayer, nil
 }
@@ -227,17 +257,31 @@ func (r *Relayer) Start(ctx context.Context) error {
 	log.Printf("[Relayer] Filtering for VAAs from chain %d to chain %d", r.config.SourceChainID, r.config.DestChainID)
 	log.Printf("[Relayer] Monitoring emitter address: %s", r.config.EmitterAddress)
 
+	// Create a wait group to track goroutines
+	var wg sync.WaitGroup
+
 	// Subscribe to VAAs
 	stream, err := r.spyClient.SubscribeSignedVAA(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to VAA stream: %w", err)
+		return fmt.Errorf("subscribe to VAA stream: %v", err)
 	}
 
 	log.Println("[Relayer] Listening for VAAs...")
+
+	// Create a separate context for graceful shutdown
+	processingCtx, cancelProcessing := context.WithCancel(context.Background())
+	defer cancelProcessing()
+
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("[Relayer] Shutting down relayer.")
+			// Cancel all processing
+			cancelProcessing()
+			// Wait for all processing goroutines to complete
+			log.Println("[Relayer] Waiting for all VAA processing to complete...")
+			wg.Wait()
+			log.Println("[Relayer] All VAA processing completed, shutdown complete.")
 			return nil
 		default:
 			// Receive the next VAA
@@ -245,12 +289,23 @@ func (r *Relayer) Start(ctx context.Context) error {
 			if err != nil {
 				log.Printf("[Relayer] Stream error: %v. Retrying in 5s...", err)
 				time.Sleep(5 * time.Second)
-				stream, _ = r.spyClient.SubscribeSignedVAA(ctx)
+				stream, err = r.spyClient.SubscribeSignedVAA(ctx)
+				if err != nil {
+					// Cancel all processing before returning
+					cancelProcessing()
+					// Wait for all processing goroutines to complete
+					wg.Wait()
+					return fmt.Errorf("subscribe to VAA stream after retry: %v", err)
+				}
 				continue
 			}
 
-			// Process the VAA
-			go r.processVAA(ctx, resp.VaaBytes)
+			// Process the VAA in a goroutine, but track it with the WaitGroup
+			wg.Add(1)
+			go func(vaaBytes []byte) {
+				defer wg.Done()
+				r.processVAA(processingCtx, vaaBytes)
+			}(resp.VaaBytes)
 		}
 	}
 }
@@ -309,12 +364,7 @@ func defaultVAAProcessor(r *Relayer, vaaData *VAAData) error {
 
 	// Check if this is a VAA for the destination chain (chain ID 52)
 	if vaaData.ChainID == r.config.DestChainID && r.config.DestChainID == 52 {
-		log.Printf("[Processor] Processing VAA %d for destination chain %d",
-			vaaData.Sequence, vaaData.ChainID)
-
-		log.Println("[Processor] Executing destination chain logic...")
-		// svlachakis: Implement your destination-specific processing here
-
+		log.Println("[Processor] Destination chain logic not yet implemented...")
 		return nil
 	}
 
