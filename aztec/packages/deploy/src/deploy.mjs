@@ -35,7 +35,7 @@ async function main() {
   let encoder = new TextEncoder();
   let bytes = encoder.encode(message);
 
-  const _tx = await contract.methods.publishMessage(100,bytes, 0).send().wait();
+  const _tx = await contract.methods.publishMessage(100,bytes, 2).send().wait();
 
   const sampleLogFilter = {
     txHash: '0x100ebe8cfa848587397b272a40426223004c5ee3838d22652c33e10c7fe7d1f7',
