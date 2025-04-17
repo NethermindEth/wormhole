@@ -52,7 +52,7 @@ spec:
             - http://eth-devnet:8545
             - --ethContract
             - "0xC89Ce4735882C9F0f0FE26686c53074E09B0D550"
-            - --logLevel=warn
+            - --logLevel=debug
           ports:
             - containerPort: 7072
               name: spyrpc
