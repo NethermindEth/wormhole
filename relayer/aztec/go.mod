@@ -1,4 +1,4 @@
-module aztec/relayer
+module github.com/wormhole-foundation/wormhole/aztec/relayer
 
 go 1.24.1
 
