@@ -888,49 +888,6 @@ func containsBlockHashDetailed(data string, topics []string, blockHash string) (
 	return false, ""
 }
 
-// containsBlockHash checks if the event data contains the specified block hash
-func containsBlockHash(data string, topics []string, blockHash string) bool {
-	// Remove 0x prefix from all strings for consistency
-	data = strings.TrimPrefix(data, "0x")
-	blockHash = strings.TrimPrefix(blockHash, "0x")
-
-	// Check if the blockHash appears in any of the topics
-	// Topics are usually 32 bytes (64 hex chars) each
-	for _, topic := range topics {
-		topic = strings.TrimPrefix(topic, "0x")
-		if topic == blockHash {
-			return true
-		}
-	}
-
-	// Check for the block hash in the data
-	// For Aztec, we expect the block hash might be a 32-byte value in the data
-	// We need to scan the data for the block hash
-
-	// If data is empty, no match
-	if len(data) < 64 {
-		return false
-	}
-
-	// Scan through the data in 32-byte chunks (64 hex chars)
-	for i := 0; i <= len(data)-64; i += 64 {
-		chunk := data[i : i+64]
-		if chunk == blockHash {
-			return true
-		}
-	}
-
-	// For partial matches at the end
-	if len(data)%64 >= len(blockHash) {
-		endChunk := data[len(data)-(len(data)%64):]
-		if endChunk == blockHash {
-			return true
-		}
-	}
-
-	return false
-}
-
 // getSuitableBlockRange returns a reasonable block range to search for L1 inclusions
 func (w *Watcher) getSuitableBlockRange(ctx context.Context) (uint64, uint64, error) {
 	// Get the latest Ethereum block
