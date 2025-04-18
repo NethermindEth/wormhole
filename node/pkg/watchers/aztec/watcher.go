@@ -301,7 +301,7 @@ func (w *Watcher) processLog(ctx context.Context, logger *zap.Logger, extLog Ext
 		return w.publishObservation(logger, params, payload, blockInfo)
 	case 2:
 		// Requires Ethereum finality, queue for later processing
-		return w.queueForFinality(ctx, logger, params, payload, blockInfo, extLog.ID.BlockNumber)
+		return w.queueForFinality(logger, params, payload, blockInfo, extLog.ID.BlockNumber)
 	default:
 		logger.Warn("Unknown consistency level, treating as immediate publish",
 			zap.Uint8("level", params.ConsistencyLevel))
@@ -310,7 +310,7 @@ func (w *Watcher) processLog(ctx context.Context, logger *zap.Logger, extLog Ext
 }
 
 // queueForFinality adds an observation to the pending queue for Ethereum finality checking
-func (w *Watcher) queueForFinality(ctx context.Context, logger *zap.Logger, params LogParameters, payload []byte, blockInfo BlockInfo, blockNumber int) error {
+func (w *Watcher) queueForFinality(logger *zap.Logger, params LogParameters, payload []byte, blockInfo BlockInfo, blockNumber int) error {
 	// Create unique ID for this observation
 	observationID := w.createObservationID(params, blockNumber)
 

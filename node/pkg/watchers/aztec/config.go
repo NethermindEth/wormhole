@@ -14,7 +14,7 @@ type WatcherConfig struct {
 	NetworkID watchers.NetworkID // human readable name
 	ChainID   vaa.ChainID        // ChainID
 	Rpc       string
-	ethRpc    string
+	EthRpc    string
 	Contract  string
 }
 
@@ -22,8 +22,8 @@ func (wc *WatcherConfig) GetNetworkID() watchers.NetworkID {
 	return wc.NetworkID
 }
 
-func (wc *WatcherConfig) GetEthRpc() watchers.NetworkID {
-	return wc.NetworkID
+func (wc *WatcherConfig) GetEthRpc() string {
+	return wc.EthRpc
 }
 
 func (wc *WatcherConfig) GetChainID() vaa.ChainID {
@@ -46,5 +46,11 @@ func (wc *WatcherConfig) Create(
 	_ chan<- *common.GuardianSet,
 	env common.Environment,
 ) (interfaces.L1Finalizer, supervisor.Runnable, interfaces.Reobserver, error) {
-	return nil, NewWatcher(wc.ChainID, wc.NetworkID, wc.Rpc, wc.Contract, "http://aztec-sandbox:8545", msgC, obsvReqC).Run, nil, nil
+	// Use the configured EthRpc if provided, otherwise use a default value
+	ethRpc := wc.EthRpc
+	if ethRpc == "" {
+		ethRpc = "http://aztec-sandbox:8545" // Default value
+	}
+
+	return nil, NewWatcher(wc.ChainID, wc.NetworkID, wc.Rpc, wc.Contract, ethRpc, msgC, obsvReqC).Run, nil, nil
 }
