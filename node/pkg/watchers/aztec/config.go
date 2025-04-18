@@ -1,56 +1,71 @@
 package aztec
 
 import (
-	"github.com/certusone/wormhole/node/pkg/common"
-	gossipv1 "github.com/certusone/wormhole/node/pkg/proto/gossip/v1"
-	"github.com/certusone/wormhole/node/pkg/query"
-	"github.com/certusone/wormhole/node/pkg/supervisor"
-	"github.com/certusone/wormhole/node/pkg/watchers"
-	"github.com/certusone/wormhole/node/pkg/watchers/interfaces"
+	"time"
+
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 )
 
-type WatcherConfig struct {
-	NetworkID watchers.NetworkID // human readable name
-	ChainID   vaa.ChainID        // ChainID
-	Rpc       string
-	EthRpc    string
-	Contract  string
+// Config holds all configuration for the Aztec watcher
+type Config struct {
+	// Chain identification
+	ChainID   vaa.ChainID
+	NetworkID string
+
+	// Connection details
+	RpcURL          string
+	ContractAddress string
+	EthRpcURL       string
+
+	// Processing parameters
+	StartBlock        int
+	PayloadInitialCap int
+
+	// Timeouts and intervals
+	RPCTimeout            time.Duration
+	LogProcessingInterval time.Duration
+	FinalityCheckInterval time.Duration
+	FinalityTimeout       time.Duration
+	RequestTimeout        time.Duration
+
+	// Ethereum rollup contract address
+	RollupContractAddress string
+
+	// Retry configuration
+	MaxRetries        int
+	InitialBackoff    time.Duration
+	BackoffMultiplier float64
 }
 
-func (wc *WatcherConfig) GetNetworkID() watchers.NetworkID {
-	return wc.NetworkID
-}
+// DefaultConfig returns a default configuration
+func DefaultConfig(chainID vaa.ChainID, networkID string, rpcURL, contractAddress, ethRpcURL string) Config {
+	return Config{
+		// Chain identification
+		ChainID:   chainID,
+		NetworkID: networkID,
 
-func (wc *WatcherConfig) GetEthRpc() string {
-	return wc.EthRpc
-}
+		// Connection details
+		RpcURL:          rpcURL,
+		ContractAddress: contractAddress,
+		EthRpcURL:       ethRpcURL,
 
-func (wc *WatcherConfig) GetChainID() vaa.ChainID {
-	return wc.ChainID
-}
+		// Processing parameters
+		StartBlock:        0,
+		PayloadInitialCap: 13,
 
-func (wc *WatcherConfig) RequiredL1Finalizer() watchers.NetworkID {
-	return ""
-}
+		// Timeouts and intervals
+		RPCTimeout:            30 * time.Second,
+		LogProcessingInterval: 1 * time.Second,
+		FinalityCheckInterval: 10 * time.Second,
+		FinalityTimeout:       30 * time.Minute,
+		RequestTimeout:        10 * time.Second,
 
-func (wc *WatcherConfig) SetL1Finalizer(l1finalizer interfaces.L1Finalizer) {
-	// empty
-}
+		// Ethereum rollup contract address
+		RollupContractAddress: "0x0b306bf915c4d645ff596e518faf3f9669b97016",
 
-func (wc *WatcherConfig) Create(
-	msgC chan<- *common.MessagePublication,
-	obsvReqC <-chan *gossipv1.ObservationRequest,
-	_ <-chan *query.PerChainQueryInternal,
-	_ chan<- *query.PerChainQueryResponseInternal,
-	_ chan<- *common.GuardianSet,
-	env common.Environment,
-) (interfaces.L1Finalizer, supervisor.Runnable, interfaces.Reobserver, error) {
-	// Use the configured EthRpc if provided, otherwise use a default value
-	ethRpc := wc.EthRpc
-	if ethRpc == "" {
-		ethRpc = "http://aztec-sandbox:8545" // Default value
+		// Retry configuration
+		MaxRetries:        3,
+		InitialBackoff:    500 * time.Millisecond,
+		BackoffMultiplier: 1.5,
 	}
-
-	return nil, NewWatcher(wc.ChainID, wc.NetworkID, wc.Rpc, wc.Contract, ethRpc, msgC, obsvReqC).Run, nil, nil
 }
