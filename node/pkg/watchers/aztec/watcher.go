@@ -1,4 +1,3 @@
-// watcher.go
 package aztec
 
 import (
@@ -48,7 +47,6 @@ func NewWatcher(
 func (w *Watcher) Run(ctx context.Context) error {
 	w.logger.Info("Starting Aztec watcher",
 		zap.String("rpc", w.config.RpcURL),
-		zap.String("eth_rpc", w.config.EthRpcURL),
 		zap.String("contract", w.config.ContractAddress))
 
 	// Create an error channel
@@ -60,7 +58,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 		return w.processBlocks(ctx)
 	})
 
-	// Start the Ethereum finality checker goroutine
+	// Start the finality checker goroutine
 	common.RunWithScissors(ctx, errC, "aztec_finality_checker", func(ctx context.Context) error {
 		return w.checkFinality(ctx)
 	})
@@ -96,7 +94,7 @@ func (w *Watcher) processBlocks(ctx context.Context) error {
 
 // checkFinality periodically checks for finalized observations
 func (w *Watcher) checkFinality(ctx context.Context) error {
-	w.logger.Info("Starting Ethereum finality checker")
+	w.logger.Info("Starting Aztec finality checker")
 
 	ticker := time.NewTicker(w.config.FinalityCheckInterval)
 	defer ticker.Stop()
@@ -206,7 +204,7 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog) erro
 		// No finality check needed, publish immediately
 		return w.publishObservation(params, payload, blockInfo)
 	case 2:
-		// Requires Ethereum finality, queue for later processing
+		// Requires finality, queue for later processing
 		w.observationManager.QueueObservation(params, payload, blockInfo, extLog.ID.BlockNumber)
 		return nil
 	default:
@@ -218,40 +216,8 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog) erro
 
 // processFinality checks all pending observations for finality
 func (w *Watcher) processFinality(ctx context.Context) error {
-	// First check that the L1 verifier is ready
-	w.l1Verifier.CheckRollupContractExists(ctx)
-
 	// Start with logging the pending observations for visibility
 	w.observationManager.LogPendingObservations()
-
-	// Check if Ethereum RPC is available
-	isL1Available := w.l1Verifier.IsAvailable(ctx)
-	if !isL1Available {
-		w.logger.Warn("Ethereum RPC is not available, using fallback confirmation method")
-	} else {
-		// Verify that the rollup contract exists
-		contractExists := w.l1Verifier.CheckRollupContractExists(ctx)
-		if !contractExists {
-			w.logger.Warn("Rollup contract not found, using fallback confirmation method")
-			isL1Available = false
-		}
-	}
-
-	// Variable to hold finalized block if we can get it
-	var finalizedBlock *EthereumBlock
-	var finalizedBlockErr error
-
-	// Only try to get finalized block if Ethereum RPC is available
-	if isL1Available {
-		finalizedBlock, finalizedBlockErr = w.l1Verifier.FetchFinalizedBlock(ctx)
-		if finalizedBlockErr != nil {
-			w.logger.Warn("Failed to get Ethereum finalized block, using fallback confirmation method",
-				zap.Error(finalizedBlockErr))
-		} else {
-			w.logger.Info("Checking pending observations",
-				zap.Uint64("finalized_eth_block", finalizedBlock.Number))
-		}
-	}
 
 	// Get all pending observations
 	pendingObservations := w.observationManager.GetPendingObservations()
@@ -261,6 +227,17 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 	}
 
 	w.logger.Info("Processing pending observations", zap.Int("count", len(pendingObservations)))
+
+	// Get the latest finalized block
+	finalizedBlock, err := w.l1Verifier.GetFinalizedBlock(ctx)
+	if err != nil {
+		w.logger.Warn("Failed to get finalized block, using timeout-based fallback",
+			zap.Error(err))
+		// Continue with fallback approach
+	} else {
+		w.logger.Info("Checking pending observations against finalized block",
+			zap.Int("finalized_block", finalizedBlock.Number))
+	}
 
 	// Process each pending observation
 	var toPublish []string
@@ -285,9 +262,8 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 			continue
 		}
 
-		// If Ethereum RPC is not available or we couldn't get a finalized block,
-		// use a time-based fallback (confirm after waiting a certain period)
-		if !isL1Available || finalizedBlockErr != nil {
+		// If we couldn't get the finalized block, use time-based fallback
+		if err != nil || finalizedBlock == nil {
 			// Implement fallback confirmation after 5 minutes
 			if time.Since(observation.SubmitTime) > 5*time.Minute {
 				w.logger.Info("Using time-based fallback confirmation",
@@ -305,83 +281,33 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 			continue
 		}
 
-		// Only try the L1 block check if we have a valid finalized block
-		if finalizedBlock != nil {
-			// Get the block details to find the hash
-			blockDetails, err := w.blockFetcher.FetchBlockDetails(ctx, observation.AztecBlockNum)
-			if err != nil {
-				w.logger.Warn("Failed to get Aztec block details",
-					zap.String("id", id),
-					zap.Int("aztec_block", observation.AztecBlockNum),
-					zap.Error(err))
+		// Check if the block is finalized
+		if observation.AztecBlockNum <= finalizedBlock.Number {
+			w.logger.Info("Aztec block is now finalized",
+				zap.String("id", id),
+				zap.Int("aztec_block", observation.AztecBlockNum),
+				zap.Int("finalized_block", finalizedBlock.Number))
 
-				// Record the lookup failure
-				w.observationManager.IncrementLookupFailures()
+			// Calculate finality time for metrics
+			finalityTime := time.Since(observation.SubmitTime).Seconds()
+			w.observationManager.RecordFinalityTime(finalityTime)
+
+			// Publish the observation
+			if err := w.publishObservation(observation.Params, observation.Payload, observation.BlockInfo); err != nil {
+				w.logger.Error("Failed to publish finalized observation", zap.Error(err))
 				continue
 			}
 
-			// Check if the Aztec block has been included in an L1 block
-			l1BlockNumber, err := w.l1Verifier.GetL1InclusionBlock(ctx, blockDetails.Root)
-			if err != nil {
-				if _, ok := err.(*ErrBlockNotIncluded); ok {
-					// This is an expected "not yet included" error
-					w.logger.Info("Aztec block not yet included in L1",
-						zap.String("id", id),
-						zap.Int("aztec_block", observation.AztecBlockNum),
-						zap.Int("attempts", observation.AttemptCount))
-				} else {
-					// This is an unexpected error
-					w.logger.Warn("Failed to get L1 block for Aztec block",
-						zap.String("id", id),
-						zap.Int("aztec_block", observation.AztecBlockNum),
-						zap.Error(err))
-
-					// Record the lookup failure
-					w.observationManager.IncrementLookupFailures()
-				}
-				continue
-			}
-
-			if l1BlockNumber == 0 {
-				// Block not yet included in L1
-				w.logger.Info("Aztec block not yet included in L1",
-					zap.String("id", id),
-					zap.Int("aztec_block", observation.AztecBlockNum),
-					zap.Int("attempts", observation.AttemptCount))
-				continue
-			}
-
-			// Check if L1 block is finalized
-			if l1BlockNumber <= finalizedBlock.Number {
-				// L1 block is finalized, we can publish the observation
-				w.logger.Info("Aztec block is now finalized on Ethereum L1",
-					zap.String("id", id),
-					zap.Int("aztec_block", observation.AztecBlockNum),
-					zap.Uint64("l1_block", l1BlockNumber),
-					zap.Uint64("finalized_block", finalizedBlock.Number))
-
-				// Calculate finality time for metrics
-				finalityTime := time.Since(observation.SubmitTime).Seconds()
-				w.observationManager.RecordFinalityTime(finalityTime)
-
-				// Publish the observation
-				if err := w.publishObservation(observation.Params, observation.Payload, observation.BlockInfo); err != nil {
-					w.logger.Error("Failed to publish finalized observation", zap.Error(err))
-					continue
-				}
-
-				toPublish = append(toPublish, id)
-			} else {
-				// Not yet finalized
-				blocksLeft := l1BlockNumber - finalizedBlock.Number
-				w.logger.Info("Aztec block not yet finalized on L1",
-					zap.String("id", id),
-					zap.Int("aztec_block", observation.AztecBlockNum),
-					zap.Uint64("l1_block", l1BlockNumber),
-					zap.Uint64("finalized_block", finalizedBlock.Number),
-					zap.Uint64("blocks_left", blocksLeft),
-					zap.Duration("waiting_for", time.Since(observation.SubmitTime)))
-			}
+			toPublish = append(toPublish, id)
+		} else {
+			// Not yet finalized
+			blocksLeft := observation.AztecBlockNum - finalizedBlock.Number
+			w.logger.Info("Aztec block not yet finalized",
+				zap.String("id", id),
+				zap.Int("aztec_block", observation.AztecBlockNum),
+				zap.Int("finalized_block", finalizedBlock.Number),
+				zap.Int("blocks_left", blocksLeft),
+				zap.Duration("waiting_for", time.Since(observation.SubmitTime)))
 		}
 	}
 

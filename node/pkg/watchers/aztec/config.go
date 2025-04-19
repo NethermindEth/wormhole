@@ -15,7 +15,6 @@ type Config struct {
 	// Connection details
 	RpcURL          string
 	ContractAddress string
-	EthRpcURL       string
 
 	// Processing parameters
 	StartBlock        int
@@ -28,9 +27,6 @@ type Config struct {
 	FinalityTimeout       time.Duration
 	RequestTimeout        time.Duration
 
-	// Ethereum rollup contract address
-	RollupContractAddress string
-
 	// Retry configuration
 	MaxRetries        int
 	InitialBackoff    time.Duration
@@ -38,7 +34,7 @@ type Config struct {
 }
 
 // DefaultConfig returns a default configuration
-func DefaultConfig(chainID vaa.ChainID, networkID string, rpcURL, contractAddress, ethRpcURL string) Config {
+func DefaultConfig(chainID vaa.ChainID, networkID string, rpcURL, contractAddress string) Config {
 	return Config{
 		// Chain identification
 		ChainID:   chainID,
@@ -47,7 +43,6 @@ func DefaultConfig(chainID vaa.ChainID, networkID string, rpcURL, contractAddres
 		// Connection details
 		RpcURL:          rpcURL,
 		ContractAddress: contractAddress,
-		EthRpcURL:       ethRpcURL,
 
 		// Processing parameters
 		StartBlock:        0,
@@ -59,9 +54,6 @@ func DefaultConfig(chainID vaa.ChainID, networkID string, rpcURL, contractAddres
 		FinalityCheckInterval: 10 * time.Second,
 		FinalityTimeout:       30 * time.Minute,
 		RequestTimeout:        10 * time.Second,
-
-		// Ethereum rollup contract address
-		RollupContractAddress: "0x0b306bf915c4d645ff596e518faf3f9669b97016",
 
 		// Retry configuration
 		MaxRetries:        3,

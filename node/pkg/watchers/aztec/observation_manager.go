@@ -53,20 +53,20 @@ func NewObservationManager(networkID string, logger *zap.Logger) ObservationMana
 		messagesPending: promauto.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "wormhole_aztec_observations_pending",
-				Help: "Number of observations waiting for Ethereum finality",
+				Help: "Number of observations waiting for finality",
 			}, []string{"chain_name"}),
 
 		finalityTime: promauto.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "wormhole_aztec_l1_finality_time_seconds",
-				Help:    "Time in seconds for an Aztec block to be finalized on L1",
+				Name:    "wormhole_aztec_finality_time_seconds",
+				Help:    "Time in seconds for an Aztec block to be finalized",
 				Buckets: prometheus.ExponentialBuckets(10, 2, 10), // From 10s to ~2.8h
 			}, []string{"chain_name"}),
 
 		lookupFailures: promauto.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "wormhole_aztec_l1_lookup_failures_total",
-				Help: "Number of failures when looking up Aztec blocks in L1",
+				Name: "wormhole_aztec_lookup_failures_total",
+				Help: "Number of failures when looking up Aztec blocks",
 			}, []string{"chain_name"}),
 	}
 
@@ -122,7 +122,7 @@ func (m *observationManager) QueueObservation(params LogParameters, payload []by
 	// Update metrics
 	m.metrics.messagesPending.WithLabelValues(m.networkID).Set(float64(pendingCount))
 
-	m.logger.Info("Queued observation for Ethereum finality check",
+	m.logger.Info("Queued observation for finality check",
 		zap.String("id", observationID),
 		zap.Int("aztec_block", blockNumber),
 		zap.Uint64("sequence", params.Sequence),
@@ -209,7 +209,7 @@ func (m *observationManager) RecordFinalityTime(duration float64) {
 	m.metrics.finalityTime.WithLabelValues(m.networkID).Observe(duration)
 }
 
-// IncrementLookupFailures increases the counter for L1 lookup failures
+// IncrementLookupFailures increases the counter for lookup failures
 func (m *observationManager) IncrementLookupFailures() {
 	m.metrics.lookupFailures.WithLabelValues(m.networkID).Inc()
 }

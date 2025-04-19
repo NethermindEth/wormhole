@@ -169,28 +169,18 @@ func (c *httpClient) doRequestWithRetry(ctx context.Context, req *http.Request) 
 		}
 
 		// Check for JSON-RPC errors in the response
-		var errorCheck struct {
-			Error *struct {
-				Code    int    `json:"code"`
-				Message string `json:"message"`
-			} `json:"error,omitempty"`
-		}
-
-		if err := json.Unmarshal(body, &errorCheck); err == nil && errorCheck.Error != nil {
+		hasError, rpcError := GetJSONRPCError(body)
+		if hasError {
 			c.logger.Warn("JSON-RPC error",
 				zap.String("url", req.URL.String()),
-				zap.Int("code", errorCheck.Error.Code),
-				zap.String("message", errorCheck.Error.Message),
+				zap.Int("code", rpcError.Code),
+				zap.String("message", rpcError.Msg),
 				zap.Duration("duration", duration))
 
-			lastErr = &ErrRPCError{
-				Method: method,
-				Code:   errorCheck.Error.Code,
-				Msg:    errorCheck.Error.Message,
-			}
+			lastErr = rpcError
 
 			// Retry on server errors
-			if errorCheck.Error.Code >= -32099 && errorCheck.Error.Code <= -32000 && retry < c.maxRetries {
+			if IsRetryableRPCError(rpcError) && retry < c.maxRetries {
 				select {
 				case <-time.After(backoff):
 					backoff = time.Duration(float64(backoff) * c.backoffMultiplier)

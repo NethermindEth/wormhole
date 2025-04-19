@@ -14,7 +14,6 @@ type WatcherConfig struct {
 	ChainID   vaa.ChainID
 	Rpc       string
 	Contract  string
-	EthRpc    string // Ethereum RPC URL for finality checks
 }
 
 // LogParameters encapsulates the core parameters from a log
@@ -25,7 +24,7 @@ type LogParameters struct {
 	ConsistencyLevel uint8
 }
 
-// PendingObservation represents an observation waiting for Ethereum finality
+// PendingObservation represents an observation waiting for finality
 type PendingObservation struct {
 	Params        LogParameters
 	Payload       []byte
@@ -41,11 +40,33 @@ type BlockInfo struct {
 	Timestamp uint64
 }
 
-// EthereumBlock represents key information about an Ethereum block
-type EthereumBlock struct {
-	Number    uint64
-	Hash      string
-	Timestamp uint64
+// FinalizedBlock represents a finalized block's information
+type FinalizedBlock struct {
+	Number int
+	Hash   string
+}
+
+// L2Tips represents the response from the node_getL2Tips RPC method
+type L2Tips struct {
+	Latest struct {
+		Number int    `json:"number"`
+		Hash   string `json:"hash"`
+	} `json:"latest"`
+	Proven struct {
+		Number int    `json:"number"`
+		Hash   string `json:"hash"`
+	} `json:"proven"`
+	Finalized struct {
+		Number int    `json:"number"`
+		Hash   string `json:"hash"`
+	} `json:"finalized"`
+}
+
+// L2TipsResponse represents the JSON-RPC response containing L2Tips
+type L2TipsResponse struct {
+	JsonRPC string `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Result  L2Tips `json:"result"`
 }
 
 // JSON-RPC related structures

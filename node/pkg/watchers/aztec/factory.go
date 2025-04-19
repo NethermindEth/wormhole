@@ -47,7 +47,7 @@ func (c *WatcherConfig) Create(
 	env common.Environment,
 ) (interfaces.L1Finalizer, supervisor.Runnable, interfaces.Reobserver, error) {
 	// Create the runnable and L1Finalizer
-	l1Finalizer, runnable := NewWatcherFromConfig(c.ChainID, string(c.NetworkID), c.Rpc, c.Contract, c.EthRpc, msgC, obsvReqC)
+	l1Finalizer, runnable := NewWatcherFromConfig(c.ChainID, string(c.NetworkID), c.Rpc, c.Contract, msgC, obsvReqC)
 
 	// Return the L1Verifier as an L1Finalizer along with the runnable
 	// This makes it available to the framework if needed
@@ -67,12 +67,10 @@ func NewWatcherFromConfig(
 	networkID string,
 	rpcURL string,
 	contractAddress string,
-	ethRpcURL string,
 	msgC chan<- *common.MessagePublication,
 	obsvReqC <-chan *gossipv1.ObservationRequest,
 ) (interfaces.L1Finalizer, supervisor.Runnable) {
-	// Create a shared L1Verifier instance outside the runnable
-	// so we can return it separately
+	// Create a shared HTTPClient
 	httpClient := NewHTTPClient(
 		10*time.Second,         // Default timeout
 		3,                      // Default max retries
@@ -81,11 +79,11 @@ func NewWatcherFromConfig(
 		zap.L().Named("aztec"), // Default logger until context provides one
 	)
 
-	l1Verifier := NewEthereumVerifier(
-		ethRpcURL,
-		"0x0b306bf915c4d645ff596e518faf3f9669b97016", // Default contract address
+	// Create a shared L1Verifier instance
+	l1Verifier := NewAztecFinalityVerifier(
+		rpcURL, // We use the Aztec RPC URL
 		httpClient,
-		zap.L().Named("aztec"), // Default logger until context provides one
+		zap.L().Named("aztec.finality"),
 	)
 
 	// Create a runnable that uses the L1Verifier
@@ -93,14 +91,13 @@ func NewWatcherFromConfig(
 		logger := supervisor.Logger(ctx)
 		logger.Info("Starting Aztec watcher",
 			zap.String("rpc", rpcURL),
-			zap.String("eth_rpc", ethRpcURL),
 			zap.String("contract", contractAddress))
 
 		// Create the readiness component
 		readinessSync := common.MustConvertChainIdToReadinessSyncing(chainID)
 
 		// Create default config
-		config := DefaultConfig(chainID, networkID, rpcURL, contractAddress, ethRpcURL)
+		config := DefaultConfig(chainID, networkID, rpcURL, contractAddress)
 
 		// Create a new HTTPClient with context-provided logger
 		httpClient := NewHTTPClient(
@@ -116,8 +113,8 @@ func NewWatcherFromConfig(
 
 		// Use the existing L1Verifier but update its logger
 		// We can't create a new one because we need to return the original instance
-		if l1v, ok := l1Verifier.(*ethereumVerifier); ok {
-			l1v.logger = logger.Named("ethereum_verifier")
+		if l1v, ok := l1Verifier.(*aztecFinalityVerifier); ok {
+			l1v.logger = logger.Named("aztec_finality")
 		}
 
 		observationManager := NewObservationManager(networkID, logger)
