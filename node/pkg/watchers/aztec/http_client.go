@@ -49,13 +49,13 @@ func (c *httpClient) DoRequest(ctx context.Context, url string, payload map[stri
 	// Marshal the payload
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("error marshaling JSON: %w", err)
+		return nil, fmt.Errorf("error marshaling JSON: %v", err)
 	}
 
 	// Create the request
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return nil, fmt.Errorf("error creating request: %w", err)
+		return nil, fmt.Errorf("error creating request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -114,7 +114,7 @@ func (c *httpClient) doRequestWithRetry(ctx context.Context, req *http.Request) 
 					return nil, ctx.Err()
 				}
 			}
-			return nil, fmt.Errorf("request error after %d attempts: %w", retry+1, err)
+			return nil, fmt.Errorf("request error after %d attempts: %v", retry+1, err)
 		}
 		defer resp.Body.Close()
 
@@ -150,7 +150,7 @@ func (c *httpClient) doRequestWithRetry(ctx context.Context, req *http.Request) 
 				zap.String("url", req.URL.String()),
 				zap.Duration("duration", duration),
 				zap.Error(err))
-			lastErr = fmt.Errorf("error reading response: %w", err)
+			lastErr = fmt.Errorf("error reading response: %v", err)
 
 			if retry < c.maxRetries {
 				select {

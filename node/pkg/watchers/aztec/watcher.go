@@ -116,7 +116,7 @@ func (w *Watcher) processSingleBlock(ctx context.Context) error {
 	// Get the latest block number
 	latestBlock, err := w.blockFetcher.FetchLatestBlockNumber(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to fetch latest block number: %w", err)
+		return fmt.Errorf("failed to fetch latest block number: %v", err)
 	}
 
 	// Only process if there are new blocks
@@ -147,7 +147,7 @@ func (w *Watcher) processSingleBlock(ctx context.Context) error {
 func (w *Watcher) processBlockContents(ctx context.Context, blockNumber int) error {
 	logs, err := w.blockFetcher.FetchPublicLogs(ctx, blockNumber, blockNumber+1)
 	if err != nil {
-		return fmt.Errorf("failed to fetch public logs: %w", err)
+		return fmt.Errorf("failed to fetch public logs: %v", err)
 	}
 
 	// Only log if there are actually logs to process
@@ -182,7 +182,7 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog) erro
 	// Extract event parameters
 	params, err := w.parseLogParameters(extLog.Log.Log)
 	if err != nil {
-		return fmt.Errorf("failed to parse log parameters: %w", err)
+		return fmt.Errorf("failed to parse log parameters: %v", err)
 	}
 
 	// Create message payload
@@ -348,19 +348,19 @@ func (w *Watcher) parseLogParameters(logEntries []string) (LogParameters, error)
 	// Parse sequence
 	sequence, err := ParseHexUint64(logEntries[1])
 	if err != nil {
-		return LogParameters{}, fmt.Errorf("failed to parse sequence: %w", err)
+		return LogParameters{}, fmt.Errorf("failed to parse sequence: %v", err)
 	}
 
 	// Parse nonce
 	nonce, err := ParseHexUint64(logEntries[2])
 	if err != nil {
-		return LogParameters{}, fmt.Errorf("failed to parse nonce: %w", err)
+		return LogParameters{}, fmt.Errorf("failed to parse nonce: %v", err)
 	}
 
 	// Parse consistency level
 	consistencyLevel, err := ParseHexUint64(logEntries[3])
 	if err != nil {
-		return LogParameters{}, fmt.Errorf("failed to parse consistencyLevel: %w", err)
+		return LogParameters{}, fmt.Errorf("failed to parse consistencyLevel: %v", err)
 	}
 
 	// Removed verbose logging of each parameter

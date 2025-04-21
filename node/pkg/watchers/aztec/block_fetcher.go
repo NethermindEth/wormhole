@@ -47,7 +47,7 @@ func (f *aztecBlockFetcher) FetchLatestBlockNumber(ctx context.Context) (int, er
 
 	responseBody, err := f.client.DoRequest(ctx, f.rpcURL, payload)
 	if err != nil {
-		return 0, fmt.Errorf("failed to fetch latest block number: %w", err)
+		return 0, fmt.Errorf("failed to fetch latest block number: %v", err)
 	}
 
 	// Parse the response
@@ -85,7 +85,7 @@ func (f *aztecBlockFetcher) FetchPublicLogs(ctx context.Context, fromBlock, toBl
 
 	responseBody, err := f.client.DoRequest(ctx, f.rpcURL, payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch public logs: %w", err)
+		return nil, fmt.Errorf("failed to fetch public logs: %v", err)
 	}
 
 	// Parse the response
@@ -113,7 +113,7 @@ func (f *aztecBlockFetcher) FetchBlockInfo(ctx context.Context, blockNumber int)
 
 	responseBody, err := f.client.DoRequest(ctx, f.rpcURL, payload)
 	if err != nil {
-		return BlockInfo{}, fmt.Errorf("failed to fetch block info: %w", err)
+		return BlockInfo{}, fmt.Errorf("failed to fetch block info: %v", err)
 	}
 
 	// Parse the response
@@ -162,7 +162,7 @@ func (f *aztecBlockFetcher) FetchBlockDetails(ctx context.Context, blockNumber i
 
 	responseBody, err := f.client.DoRequest(ctx, f.rpcURL, payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch block details: %w", err)
+		return nil, fmt.Errorf("failed to fetch block details: %v", err)
 	}
 
 	// Parse the response

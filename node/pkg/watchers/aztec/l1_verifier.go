@@ -99,7 +99,7 @@ func (v *aztecFinalityVerifier) GetFinalizedBlock(ctx context.Context) (*Finaliz
 	v.logger.Debug("Fetching L2 tips")
 	responseBody, err := v.client.DoRequest(ctx, v.rpcURL, payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch L2 tips: %w", err)
+		return nil, fmt.Errorf("failed to fetch L2 tips: %v", err)
 	}
 
 	var response L2TipsResponse
@@ -132,7 +132,7 @@ func (v *aztecFinalityVerifier) GetFinalizedBlock(ctx context.Context) (*Finaliz
 func (v *aztecFinalityVerifier) IsBlockFinalized(ctx context.Context, blockNumber int) (bool, error) {
 	finalizedBlock, err := v.GetFinalizedBlock(ctx)
 	if err != nil {
-		return false, fmt.Errorf("failed to get finalized block: %w", err)
+		return false, fmt.Errorf("failed to get finalized block: %v", err)
 	}
 
 	isFinalized := blockNumber <= finalizedBlock.Number
