@@ -43,7 +43,8 @@ func (f *aztecBlockFetcher) FetchLatestBlockNumber(ctx context.Context) (int, er
 		"id":      1,
 	}
 
-	f.logger.Debug("Fetching latest block number")
+	// Removed debug log for fetching
+
 	responseBody, err := f.client.DoRequest(ctx, f.rpcURL, payload)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch latest block number: %w", err)
@@ -78,7 +79,7 @@ func (f *aztecBlockFetcher) FetchPublicLogs(ctx context.Context, fromBlock, toBl
 		"id":      1,
 	}
 
-	f.logger.Debug("Fetching public logs",
+	f.logger.Debug("Fetching logs",
 		zap.Int("fromBlock", fromBlock),
 		zap.Int("toBlock", toBlock))
 
@@ -108,7 +109,8 @@ func (f *aztecBlockFetcher) FetchBlockInfo(ctx context.Context, blockNumber int)
 		"id":      1,
 	}
 
-	f.logger.Debug("Fetching block info", zap.Int("blockNumber", blockNumber))
+	// Removed debug log for fetching block info
+
 	responseBody, err := f.client.DoRequest(ctx, f.rpcURL, payload)
 	if err != nil {
 		return BlockInfo{}, fmt.Errorf("failed to fetch block info: %w", err)
@@ -156,7 +158,8 @@ func (f *aztecBlockFetcher) FetchBlockDetails(ctx context.Context, blockNumber i
 		"id":      1,
 	}
 
-	f.logger.Debug("Fetching block details", zap.Int("blockNumber", blockNumber))
+	// Removed debug log for fetching block details
+
 	responseBody, err := f.client.DoRequest(ctx, f.rpcURL, payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch block details: %w", err)

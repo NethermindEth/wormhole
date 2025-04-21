@@ -129,7 +129,7 @@ func (w *Watcher) processSingleBlock(ctx context.Context) error {
 
 	// Process the next block
 	nextBlock := w.lastProcessedBlock + 1
-	w.logger.Info("Processing new block", zap.Int("blockNumber", nextBlock))
+	w.logger.Debug("Processing new block", zap.Int("blockNumber", nextBlock))
 
 	if err := w.processBlockContents(ctx, nextBlock); err != nil {
 		w.logger.Error("Failed to process block",
@@ -150,9 +150,12 @@ func (w *Watcher) processBlockContents(ctx context.Context, blockNumber int) err
 		return fmt.Errorf("failed to fetch public logs: %w", err)
 	}
 
-	w.logger.Info("Processing logs",
-		zap.Int("count", len(logs)),
-		zap.Int("blockNumber", blockNumber))
+	// Only log if there are actually logs to process
+	if len(logs) > 0 {
+		w.logger.Info("Processing logs",
+			zap.Int("count", len(logs)),
+			zap.Int("blockNumber", blockNumber))
+	}
 
 	// Process each log
 	for _, log := range logs {
@@ -169,10 +172,7 @@ func (w *Watcher) processBlockContents(ctx context.Context, blockNumber int) err
 
 // processLog handles an individual log entry
 func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog) error {
-	// Log basic info
-	w.logger.Info("Log found",
-		zap.Int("block", extLog.ID.BlockNumber),
-		zap.String("contract", extLog.Log.ContractAddress))
+	// Removed basic log info that was redundant
 
 	// Skip empty logs
 	if len(extLog.Log.Log) == 0 {
@@ -198,6 +198,12 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog) erro
 		}
 	}
 
+	// Log relevant information about the message
+	w.logger.Info("Processing message",
+		zap.Stringer("emitter", params.SenderAddress),
+		zap.Uint64("sequence", params.Sequence),
+		zap.Uint8("consistencyLevel", params.ConsistencyLevel))
+
 	// Check consistency level and handle accordingly
 	switch params.ConsistencyLevel {
 	case 0, 1:
@@ -216,17 +222,16 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog) erro
 
 // processFinality checks all pending observations for finality
 func (w *Watcher) processFinality(ctx context.Context) error {
-	// Start with logging the pending observations for visibility
+	// Start with logging the pending observations (simplified)
 	w.observationManager.LogPendingObservations()
 
 	// Get all pending observations
 	pendingObservations := w.observationManager.GetPendingObservations()
 	if len(pendingObservations) == 0 {
-		w.logger.Info("No pending observations to check")
 		return nil
 	}
 
-	w.logger.Info("Processing pending observations", zap.Int("count", len(pendingObservations)))
+	w.logger.Debug("Processing pending observations", zap.Int("count", len(pendingObservations)))
 
 	// Get the latest finalized block
 	finalizedBlock, err := w.l1Verifier.GetFinalizedBlock(ctx)
@@ -235,8 +240,7 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 			zap.Error(err))
 		// Continue with fallback approach
 	} else {
-		w.logger.Info("Checking pending observations against finalized block",
-			zap.Int("finalized_block", finalizedBlock.Number))
+		w.logger.Debug("Checking against finalized block", zap.Int("finalized_block", finalizedBlock.Number))
 	}
 
 	// Process each pending observation
@@ -300,9 +304,9 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 
 			toPublish = append(toPublish, id)
 		} else {
-			// Not yet finalized
+			// Not yet finalized - only log at debug level
 			blocksLeft := observation.AztecBlockNum - finalizedBlock.Number
-			w.logger.Info("Aztec block not yet finalized",
+			w.logger.Debug("Aztec block not yet finalized",
 				zap.String("id", id),
 				zap.Int("aztec_block", observation.AztecBlockNum),
 				zap.Int("finalized_block", finalizedBlock.Number),
@@ -323,9 +327,6 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 		w.logger.Info("Processed finalized observations",
 			zap.Int("published", len(toPublish)),
 			zap.Int("remaining", len(pendingObservations)-len(toPublish)))
-
-		// Log the updated pending observations
-		w.observationManager.LogPendingObservations()
 	}
 
 	return nil
@@ -343,28 +344,26 @@ func (w *Watcher) parseLogParameters(logEntries []string) (LogParameters, error)
 	sender := logEntries[0]
 	var senderAddress vaa.Address
 	copy(senderAddress[:], sender)
-	w.logger.Info("Sender", zap.String("value", sender))
 
 	// Parse sequence
 	sequence, err := ParseHexUint64(logEntries[1])
 	if err != nil {
 		return LogParameters{}, fmt.Errorf("failed to parse sequence: %w", err)
 	}
-	w.logger.Info("Sequence", zap.Uint64("value", sequence))
 
 	// Parse nonce
 	nonce, err := ParseHexUint64(logEntries[2])
 	if err != nil {
 		return LogParameters{}, fmt.Errorf("failed to parse nonce: %w", err)
 	}
-	w.logger.Info("Nonce", zap.Uint64("value", nonce))
 
 	// Parse consistency level
 	consistencyLevel, err := ParseHexUint64(logEntries[3])
 	if err != nil {
 		return LogParameters{}, fmt.Errorf("failed to parse consistencyLevel: %w", err)
 	}
-	w.logger.Info("ConsistencyLevel", zap.Uint64("value", consistencyLevel))
+
+	// Removed verbose logging of each parameter
 
 	return LogParameters{
 		SenderAddress:    senderAddress,
@@ -378,42 +377,23 @@ func (w *Watcher) parseLogParameters(logEntries []string) (LogParameters, error)
 func (w *Watcher) createPayload(logEntries []string) []byte {
 	payload := make([]byte, 0, w.config.PayloadInitialCap)
 
-	for i, entry := range logEntries {
+	for _, entry := range logEntries {
 		hexStr := strings.TrimPrefix(entry, "0x")
 
 		// Try to decode as hex
 		bytes, err := hex.DecodeString(hexStr)
 		if err != nil {
-			w.logger.Warn("Failed to decode hex", zap.String("entry", entry), zap.Error(err))
+			w.logger.Debug("Failed to decode hex", zap.String("entry", entry), zap.Error(err))
 			continue
 		}
 
 		// Add to payload
 		payload = append(payload, bytes...)
 
-		// Try to interpret as a string for logging
-		w.logInterpretedValue(i+4, bytes, entry)
+		// Removed the interpretive log messages
 	}
 
 	return payload
-}
-
-// logInterpretedValue attempts to interpret bytes as string or number for logging
-func (w *Watcher) logInterpretedValue(index int, bytes []byte, rawHex string) {
-	// Trim leading null bytes
-	startIndex := 0
-	for startIndex < len(bytes) && bytes[startIndex] == 0 {
-		startIndex++
-	}
-	trimmedBytes := bytes[startIndex:]
-
-	// Check if it's a printable string
-	if str := string(trimmedBytes); IsPrintableString(str) {
-		w.logger.Debug("Field as string", zap.Int("index", index), zap.String("value", str))
-	} else {
-		// Fall back to numeric representation
-		w.logger.Debug("Field as number", zap.Int("index", index), zap.String("value", rawHex))
-	}
 }
 
 // publishObservation creates and publishes a message observation
@@ -442,15 +422,13 @@ func (w *Watcher) publishObservation(params LogParameters, payload []byte, block
 	// Increment metrics
 	w.observationManager.IncrementMessagesConfirmed()
 
-	// Log the observation
+	// Log the observation - this is important so keep at INFO
 	w.logger.Info("Message observed",
 		zap.String("txHash", observation.TxIDString()),
 		zap.Time("timestamp", observation.Timestamp),
-		zap.Uint32("nonce", observation.Nonce),
 		zap.Uint64("sequence", observation.Sequence),
 		zap.Stringer("emitter_chain", observation.EmitterChain),
-		zap.Stringer("emitter_address", observation.EmitterAddress),
-		zap.Uint8("consistencyLevel", observation.ConsistencyLevel))
+		zap.Stringer("emitter_address", observation.EmitterAddress))
 
 	// Send to the message channel
 	w.msgC <- observation

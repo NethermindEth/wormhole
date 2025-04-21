@@ -81,6 +81,9 @@ func (v *aztecFinalityVerifier) GetFinalizedBlock(ctx context.Context) (*Finaliz
 	if v.finalizedBlockCache != nil && time.Since(v.finalizedBlockCacheTime) < v.finalizedBlockCacheTTL {
 		block := v.finalizedBlockCache
 		v.finalizedBlockCacheMu.RUnlock()
+		v.logger.Debug("Using cached finalized block",
+			zap.Int("number", block.Number),
+			zap.String("hash", block.Hash))
 		return block, nil
 	}
 	v.finalizedBlockCacheMu.RUnlock()
@@ -119,9 +122,8 @@ func (v *aztecFinalityVerifier) GetFinalizedBlock(ctx context.Context) (*Finaliz
 	v.finalizedBlockCacheTime = time.Now()
 	v.finalizedBlockCacheMu.Unlock()
 
-	v.logger.Info("Fetched latest finalized block",
-		zap.Int("number", block.Number),
-		zap.String("hash", block.Hash))
+	v.logger.Info("Updated finalized block",
+		zap.Int("number", block.Number))
 
 	return block, nil
 }
@@ -133,5 +135,11 @@ func (v *aztecFinalityVerifier) IsBlockFinalized(ctx context.Context, blockNumbe
 		return false, fmt.Errorf("failed to get finalized block: %w", err)
 	}
 
-	return blockNumber <= finalizedBlock.Number, nil
+	isFinalized := blockNumber <= finalizedBlock.Number
+	v.logger.Debug("Block finality check",
+		zap.Int("block", blockNumber),
+		zap.Int("finalized_block", finalizedBlock.Number),
+		zap.Bool("is_finalized", isFinalized))
+
+	return isFinalized, nil
 }

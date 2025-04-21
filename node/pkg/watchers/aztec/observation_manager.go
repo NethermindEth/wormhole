@@ -83,10 +83,7 @@ func (m *observationManager) QueueObservation(params LogParameters, payload []by
 	// Create a unique ID for this observation
 	observationID := m.createObservationID(params, blockNumber)
 
-	m.logger.Info("Creating observation ID",
-		zap.String("id", observationID),
-		zap.Stringer("sender", params.SenderAddress),
-		zap.Uint64("sequence", params.Sequence))
+	// Removed verbose logging about ID creation
 
 	// Create pending observation entry
 	pendingObservation := &PendingObservation{
@@ -113,22 +110,17 @@ func (m *observationManager) QueueObservation(params LogParameters, payload []by
 	m.pendingObservations[observationID] = pendingObservation
 	pendingCount := len(m.pendingObservations)
 
-	// Log all pending observations for debugging
-	pendingIds := make([]string, 0, pendingCount)
-	for id := range m.pendingObservations {
-		pendingIds = append(pendingIds, id)
-	}
+	// Removed verbose logging of all pending IDs
 
 	// Update metrics
 	m.metrics.messagesPending.WithLabelValues(m.networkID).Set(float64(pendingCount))
 
-	m.logger.Info("Queued observation for finality check",
+	m.logger.Debug("Queued observation for finality check",
 		zap.String("id", observationID),
 		zap.Int("aztec_block", blockNumber),
 		zap.Uint64("sequence", params.Sequence),
 		zap.Stringer("emitter", params.SenderAddress),
-		zap.Int("total_pending", pendingCount),
-		zap.Strings("pending_ids", pendingIds))
+		zap.Int("total_pending", pendingCount))
 
 	return observationID
 }
@@ -153,7 +145,7 @@ func (m *observationManager) RemoveObservation(id string) {
 	defer m.mutex.Unlock()
 
 	if obs, exists := m.pendingObservations[id]; exists {
-		m.logger.Info("Removing observation from pending map",
+		m.logger.Debug("Removing observation from pending map",
 			zap.String("id", id),
 			zap.Int("aztec_block", obs.AztecBlockNum))
 		delete(m.pendingObservations, id)
@@ -184,24 +176,26 @@ func (m *observationManager) LogPendingObservations() {
 	defer m.mutex.RUnlock()
 
 	mapSize := len(m.pendingObservations)
-	m.logger.Info("======= PENDING OBSERVATIONS DETAILS =======",
-		zap.Int("total_count", mapSize))
 
 	if mapSize == 0 {
-		m.logger.Info("No pending observations")
 		return
 	}
 
-	for id, obs := range m.pendingObservations {
-		m.logger.Info("Pending observation",
-			zap.String("id", id),
-			zap.Int("aztec_block", obs.AztecBlockNum),
-			zap.Uint64("sequence", obs.Params.Sequence),
-			zap.Stringer("sender", obs.Params.SenderAddress),
-			zap.Duration("pending_for", time.Since(obs.SubmitTime)),
-			zap.Int("attempts", obs.AttemptCount))
+	// Just log the count at info level, not all the details
+	m.logger.Info("Pending observations", zap.Int("total_count", mapSize))
+
+	// Only if debug logging is enabled, log more details
+	if m.logger.Core().Enabled(zap.DebugLevel) {
+		for id, obs := range m.pendingObservations {
+			m.logger.Debug("Pending observation details",
+				zap.String("id", id),
+				zap.Int("aztec_block", obs.AztecBlockNum),
+				zap.Uint64("sequence", obs.Params.Sequence),
+				zap.Stringer("sender", obs.Params.SenderAddress),
+				zap.Duration("pending_for", time.Since(obs.SubmitTime)),
+				zap.Int("attempts", obs.AttemptCount))
+		}
 	}
-	m.logger.Info("============================================")
 }
 
 // RecordFinalityTime records the time it took for an observation to be finalized

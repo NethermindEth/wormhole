@@ -59,11 +59,7 @@ func (c *httpClient) DoRequest(ctx context.Context, url string, payload map[stri
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// Log the request details at debug level
-	c.logger.Debug("Sending request",
-		zap.String("url", url),
-		zap.String("method", req.Method),
-		zap.Any("payload", payload))
+	// Removed debug log for request details
 
 	// Execute with retries
 	return c.doRequestWithRetry(ctx, req)
@@ -193,12 +189,7 @@ func (c *httpClient) doRequestWithRetry(ctx context.Context, req *http.Request) 
 			return nil, lastErr
 		}
 
-		// Log successful request
-		c.logger.Debug("Request successful",
-			zap.String("url", req.URL.String()),
-			zap.Duration("duration", duration),
-			zap.Int("response_size", len(body)))
-
+		// Removed debug log for successful request
 		return body, nil
 	}
 
