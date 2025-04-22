@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -26,15 +25,15 @@ import (
 
 // Config holds all configuration parameters for the relayer
 type Config struct {
-	SpyRPCHost       string
-	SourceChainID    uint16
-	DestChainID      uint16
-	DestRPCURL       string
-	PrivateKey       string
-	WormholeContract string
-	TargetContract   string
-	EmitterAddress   string
-	vaaProcessor     func(*Relayer, *VAAData) error
+	SpyRPCHost       string                         // Wormhole spy service endpoint
+	SourceChainID    uint16                         // Chain ID to receive VAAs from
+	DestChainID      uint16                         // Chain ID to relay VAAs to
+	DestRPCURL       string                         // RPC URL for the destination chain
+	PrivateKey       string                         // Private key for transaction signing
+	WormholeContract string                         // Wormhole core contract address
+	TargetContract   string                         // Target contract to call with VAAs
+	EmitterAddress   string                         // Emitter address to monitor
+	vaaProcessor     func(*Relayer, *VAAData) error // Custom VAA processor function
 }
 
 // NewConfigFromEnv creates a Config from environment variables
@@ -46,18 +45,18 @@ func NewConfigFromEnv() Config {
 		DestRPCURL:       getEnvOrDefault("DEST_RPC_URL", "http://localhost:8545"),
 		PrivateKey:       getEnvOrDefault("PRIVATE_KEY", "0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"),
 		WormholeContract: getEnvOrDefault("WORMHOLE_CONTRACT", "0x1b35884f8ba9371419d00ae228da9ff839edfe8fe6a804fdfcd430e0dc7e40db"),
-		TargetContract:   getEnvOrDefault("TARGET_CONTRACT", "0xC89Ce4735882C9F0f0FE26686c53074E09B0D550"),
-		EmitterAddress:   getEnvOrDefault("EMITTER_ADDRESS", "1b35884f8ba9371419d00ae228da9ff839edfe8fe6a804fdfcd430e0dc7e40db"),
+		TargetContract:   getEnvOrDefault("TARGET_CONTRACT", "0xEdCD6442143188Deb586e182B7900dFb8707Bc27"),
+		EmitterAddress:   getEnvOrDefault("EMITTER_ADDRESS", "3078316233353838346638626139333731343139643030616532323864613966"),
 	}
 }
 
 // VAAData encapsulates a VAA and its metadata
 type VAAData struct {
-	VAA        *vaaLib.VAA
-	RawBytes   []byte
-	ChainID    uint16
-	EmitterHex string
-	Sequence   uint64
+	VAA        *vaaLib.VAA // The parsed VAA
+	RawBytes   []byte      // Raw VAA bytes
+	ChainID    uint16      // Source chain ID
+	EmitterHex string      // Hex-encoded emitter address
+	Sequence   uint64      // VAA sequence number
 }
 
 // SpyClient handles connections to the Wormhole spy service
@@ -158,16 +157,12 @@ func (c *EVMClient) GetAddress() common.Address {
 	return c.address
 }
 
-// parseAndVerifyVM verifies a VAA on an EVM chain
-func (c *EVMClient) parseAndVerifyVM(ctx context.Context, targetContract string, vaaBytes []byte) (bool, error) {
+// callVerify calls the verify function on a Vault contract
+func (c *EVMClient) callVerify(ctx context.Context, targetContract string, vaaBytes []byte) (bool, error) {
 	const abiJSON = `[{
-        "inputs": [{"internalType": "bytes", "name": "encodedVM", "type": "bytes"}],
-        "name": "parseAndVerifyVM",
-        "outputs": [
-            {"internalType": "tuple", "name": "", "type": "tuple"},
-            {"internalType": "bool", "name": "", "type": "bool"},
-            {"internalType": "string", "name": "", "type": "string"}
-        ],
+        "inputs": [{"internalType": "bytes", "name": "encodedVm", "type": "bytes"}],
+        "name": "verify",
+        "outputs": [],
         "stateMutability": "view",
         "type": "function"
     }]`
@@ -177,7 +172,7 @@ func (c *EVMClient) parseAndVerifyVM(ctx context.Context, targetContract string,
 		return false, fmt.Errorf("ABI parse error: %w", err)
 	}
 
-	data, err := parsedABI.Pack("parseAndVerifyVM", vaaBytes)
+	data, err := parsedABI.Pack("verify", vaaBytes)
 	if err != nil {
 		return false, fmt.Errorf("ABI pack error: %w", err)
 	}
@@ -191,17 +186,25 @@ func (c *EVMClient) parseAndVerifyVM(ctx context.Context, targetContract string,
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	result, err := c.client.CallContract(ctxWithTimeout, msg, nil)
+	// Make the call
+	_, err = c.client.CallContract(ctxWithTimeout, msg, nil)
 	if err != nil {
-		return false, fmt.Errorf("contract call failed: %w", err)
+		// Check if it's a revert error
+		if revertErr, ok := err.(interface {
+			Error() string
+			ErrorData() []byte
+		}); ok {
+			revertData := revertErr.ErrorData()
+			reason, decodeErr := abi.UnpackRevert(revertData)
+			if decodeErr == nil {
+				return false, fmt.Errorf("contract revert: %s", reason)
+			}
+		}
+		return false, fmt.Errorf("verification failed: %w", err)
 	}
 
-	// Extract the "valid" boolean from the result
-	if len(result) >= 64 {
-		return result[63] == 1, nil // Check the last byte of the second 32-byte word
-	}
-
-	return false, fmt.Errorf("unexpected result format")
+	// If we reach here, the verification succeeded (no error means it passed)
+	return true, nil
 }
 
 // Relayer coordinates processing VAAs from the spy service
@@ -326,7 +329,7 @@ func (r *Relayer) processVAA(ctx context.Context, vaaBytes []byte) {
 		VAA:        wormholeVAA,
 		RawBytes:   vaaBytes,
 		ChainID:    uint16(wormholeVAA.EmitterChain),
-		EmitterHex: hex.EncodeToString(wormholeVAA.EmitterAddress[:]),
+		EmitterHex: fmt.Sprintf("%064x", wormholeVAA.EmitterAddress),
 		Sequence:   wormholeVAA.Sequence,
 	}
 
@@ -341,35 +344,37 @@ func (r *Relayer) processVAA(ctx context.Context, vaaBytes []byte) {
 
 // defaultVAAProcessor is the default VAA processing logic
 func defaultVAAProcessor(r *Relayer, vaaData *VAAData) error {
-	// Check if this is a VAA from the source chain (chain ID 52)
+	// Check if this is a VAA from the source chain
 	if vaaData.ChainID == r.config.SourceChainID {
 		log.Printf("[Processor] Processing VAA %d from source chain %d",
 			vaaData.Sequence, vaaData.ChainID)
 
-		// The original verification logic for source chain
-		log.Println("[Processor] Verifying VAA...")
-		isValid, err := r.evmClient.parseAndVerifyVM(context.Background(), r.config.TargetContract, vaaData.RawBytes)
+		// Verify the VAA
+		log.Printf("[Processor] Verifying VAA sequence %d...", vaaData.Sequence)
+
+		isValid, err := r.evmClient.callVerify(context.Background(), r.config.TargetContract, vaaData.RawBytes)
 		if err != nil {
-			return fmt.Errorf("Verification failed: %w", err)
+			log.Printf("[Processor] Verification failed for VAA sequence %d: %v",
+				vaaData.Sequence, err)
+			return fmt.Errorf("verification failed: %w", err)
 		}
 
 		if isValid {
-			log.Printf("[Processor] ✅ VAA with sequence %d is valid", vaaData.Sequence)
-		} else {
-			log.Printf("[Processor] ❌ VAA with sequence %d is invalid", vaaData.Sequence)
+			log.Printf("[Processor] VAA sequence %d verification completed successfully",
+				vaaData.Sequence)
 		}
-
 		return nil
 	}
 
-	// Check if this is a VAA for the destination chain (chain ID 52)
-	if vaaData.ChainID == r.config.DestChainID && r.config.DestChainID == 52 {
-		log.Println("[Processor] Destination chain logic not yet implemented...")
+	// Check if this is a VAA for the destination chain
+	if vaaData.ChainID == r.config.DestChainID {
+		log.Printf("[Processor] Received VAA for destination chain %d (sequence %d)",
+			vaaData.ChainID, vaaData.Sequence)
 		return nil
 	}
 
 	// If neither source nor destination match our criteria, skip this VAA
-	log.Printf("[Processor] ⚠️ Skipping VAA %d from chain %d (not configured for processing)",
+	log.Printf("[Processor] Skipping VAA %d from chain %d (not configured for processing)",
 		vaaData.Sequence, vaaData.ChainID)
 	return nil
 }
