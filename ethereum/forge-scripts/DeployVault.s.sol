@@ -9,7 +9,7 @@ contract DeployVault is Script {
     function run() public returns (address vaultAddress, address vaultGettersAddress) {
         // Parameters for initialization - adjust as needed
         address payable wormholeAddress = payable(0xC89Ce4735882C9F0f0FE26686c53074E09B0D550); // Replace with your wormhole address
-        uint16 chainId = 10004; // Your destination chain ID
+        uint16 chainId = 10003; // Your destination chain ID
         uint256 evmChainId = block.chainid; // Use actual chain ID to avoid fork issues
         uint8 finality = 2; 
         
