@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,49 +20,21 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	vaaLib "github.com/wormhole-foundation/wormhole/sdk/vaa"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// Global logger
-var logger *zap.Logger
-
-// Initialize global logger
-func initLogger() {
-	var err error
-
-	// Check if we're in development mode
-	devMode := os.Getenv("DEV_MODE") == "true"
-	if devMode {
-		// Development logger - more human-readable
-		logger, err = zap.NewDevelopment()
-	} else {
-		// Production logger - JSON format, better for log aggregation
-		logger, err = zap.NewProduction()
-	}
-
-	if err != nil {
-		// Fallback to standard logger if zap fails
-		fmt.Printf("Failed to initialize zap logger: %v\n", err)
-		logger = zap.NewExample()
-	}
-
-	// Ensure logger is flushed at program exit
-	defer logger.Sync()
-}
-
 // Config holds all configuration parameters for the relayer
 type Config struct {
-	SpyRPCHost       string                         // Wormhole spy service endpoint
-	SourceChainID    uint16                         // Chain ID to receive VAAs from
-	DestChainID      uint16                         // Chain ID to relay VAAs to
-	DestRPCURL       string                         // RPC URL for the destination chain
-	PrivateKey       string                         // Private key for transaction signing
-	WormholeContract string                         // Wormhole core contract address
-	TargetContract   string                         // Target contract to call with VAAs
-	EmitterAddress   string                         // Emitter address to monitor
-	vaaProcessor     func(*Relayer, *VAAData) error // Custom VAA processor function
+	SpyRPCHost       string
+	SourceChainID    uint16
+	DestChainID      uint16
+	DestRPCURL       string
+	PrivateKey       string
+	WormholeContract string
+	TargetContract   string
+	EmitterAddress   string
+	vaaProcessor     func(*Relayer, *VAAData) error
 }
 
 // NewConfigFromEnv creates a Config from environment variables
@@ -68,22 +42,22 @@ func NewConfigFromEnv() Config {
 	return Config{
 		SpyRPCHost:       getEnvOrDefault("SPY_RPC_HOST", "localhost:7072"),
 		SourceChainID:    uint16(getEnvIntOrDefault("SOURCE_CHAIN_ID", 52)),
-		DestChainID:      uint16(getEnvIntOrDefault("DEST_CHAIN_ID", 10003)),
+		DestChainID:      uint16(getEnvIntOrDefault("DEST_CHAIN_ID", 10004)),
 		DestRPCURL:       getEnvOrDefault("DEST_RPC_URL", "http://localhost:8545"),
 		PrivateKey:       getEnvOrDefault("PRIVATE_KEY", "0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"),
 		WormholeContract: getEnvOrDefault("WORMHOLE_CONTRACT", "0x1b35884f8ba9371419d00ae228da9ff839edfe8fe6a804fdfcd430e0dc7e40db"),
-		TargetContract:   getEnvOrDefault("TARGET_CONTRACT", "0x10fB2Ab116E2Eb3a8B5a1Ca912E05f63c3D969E4"),
-		EmitterAddress:   getEnvOrDefault("EMITTER_ADDRESS", "3078316233353838346638626139333731343139643030616532323864613966"),
+		TargetContract:   getEnvOrDefault("TARGET_CONTRACT", "0xC89Ce4735882C9F0f0FE26686c53074E09B0D550"),
+		EmitterAddress:   getEnvOrDefault("EMITTER_ADDRESS", "1b35884f8ba9371419d00ae228da9ff839edfe8fe6a804fdfcd430e0dc7e40db"),
 	}
 }
 
 // VAAData encapsulates a VAA and its metadata
 type VAAData struct {
-	VAA        *vaaLib.VAA // The parsed VAA
-	RawBytes   []byte      // Raw VAA bytes
-	ChainID    uint16      // Source chain ID
-	EmitterHex string      // Hex-encoded emitter address
-	Sequence   uint64      // VAA sequence number
+	VAA        *vaaLib.VAA
+	RawBytes   []byte
+	ChainID    uint16
+	EmitterHex string
+	Sequence   uint64
 }
 
 // SpyClient handles connections to the Wormhole spy service
@@ -94,19 +68,19 @@ type SpyClient struct {
 
 // NewSpyClient creates a new client for the Wormhole spy service
 func NewSpyClient(endpoint string) (*SpyClient, error) {
-	logger.Info("Connecting to spy service", zap.String("endpoint", endpoint))
+	log.Printf("[SpyClient] Connecting to spy service at %s...", endpoint)
 	conn, err := grpc.Dial(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to spy: %v", err)
 	}
-	logger.Info("Connected to spy service successfully")
+	log.Println("[SpyClient] Connected successfully.")
 	return &SpyClient{conn: conn, client: spyv1.NewSpyRPCServiceClient(conn)}, nil
 }
 
 // Close closes the connection to the spy service
 func (c *SpyClient) Close() {
 	if c.conn != nil {
-		logger.Info("Closing spy service connection")
+		log.Println("[SpyClient] Closing connection.")
 		c.conn.Close()
 	}
 }
@@ -116,7 +90,7 @@ func (c *SpyClient) SubscribeSignedVAA(ctx context.Context) (spyv1.SpyRPCService
 	const maxRetries = 5
 	const retryDelay = 2 * time.Second
 
-	logger.Info("Subscribing to signed VAAs")
+	log.Println("[SpyClient] Subscribing to signed VAAs...")
 
 	var stream spyv1.SpyRPCService_SubscribeSignedVAAClient
 	var err error
@@ -128,11 +102,8 @@ func (c *SpyClient) SubscribeSignedVAA(ctx context.Context) (spyv1.SpyRPCService
 		}
 
 		if attempt < maxRetries {
-			logger.Warn("Subscribe attempt failed",
-				zap.Int("attempt", attempt),
-				zap.Error(err),
-				zap.Duration("retryIn", retryDelay))
-
+			log.Printf("[SpyClient] Subscribe attempt %d failed: %v. Retrying in %v...",
+				attempt, err, retryDelay)
 			select {
 			case <-time.After(retryDelay):
 				// Continue to next retry
@@ -154,16 +125,16 @@ type EVMClient struct {
 
 // NewEVMClient creates a new client for EVM-compatible blockchains
 func NewEVMClient(rpcURL, privateKeyHex string) (*EVMClient, error) {
-	logger.Info("Connecting to EVM chain", zap.String("rpcURL", rpcURL))
+	log.Printf("[EVMClient] Connecting to %s...", rpcURL)
 	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to EVM node: %v", err)
+		return nil, fmt.Errorf("failed to connect to EVM node: %w", err)
 	}
 
 	// Parse private key
 	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyHex, "0x"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid private key: %v", err)
+		return nil, fmt.Errorf("invalid private key: %w", err)
 	}
 
 	// Derive public address
@@ -173,7 +144,7 @@ func NewEVMClient(rpcURL, privateKeyHex string) (*EVMClient, error) {
 		return nil, fmt.Errorf("error casting public key to ECDSA")
 	}
 	address := crypto.PubkeyToAddress(*publicKeyECDSA)
-	logger.Info("Connected to EVM chain", zap.String("address", address.Hex()))
+	log.Printf("[EVMClient] Connected with address: %s", address.Hex())
 
 	return &EVMClient{
 		client:     client,
@@ -187,24 +158,28 @@ func (c *EVMClient) GetAddress() common.Address {
 	return c.address
 }
 
-// callVerify calls the verify function on a Vault contract
-func (c *EVMClient) callVerify(ctx context.Context, targetContract string, vaaBytes []byte) (bool, error) {
+// parseAndVerifyVM verifies a VAA on an EVM chain
+func (c *EVMClient) parseAndVerifyVM(ctx context.Context, targetContract string, vaaBytes []byte) (bool, error) {
 	const abiJSON = `[{
-        "inputs": [{"internalType": "bytes", "name": "encodedVm", "type": "bytes"}],
-        "name": "verify",
-        "outputs": [],
+        "inputs": [{"internalType": "bytes", "name": "encodedVM", "type": "bytes"}],
+        "name": "parseAndVerifyVM",
+        "outputs": [
+            {"internalType": "tuple", "name": "", "type": "tuple"},
+            {"internalType": "bool", "name": "", "type": "bool"},
+            {"internalType": "string", "name": "", "type": "string"}
+        ],
         "stateMutability": "view",
         "type": "function"
     }]`
 
 	parsedABI, err := abi.JSON(strings.NewReader(abiJSON))
 	if err != nil {
-		return false, fmt.Errorf("ABI parse error: %v", err)
+		return false, fmt.Errorf("ABI parse error: %w", err)
 	}
 
-	data, err := parsedABI.Pack("verify", vaaBytes)
+	data, err := parsedABI.Pack("parseAndVerifyVM", vaaBytes)
 	if err != nil {
-		return false, fmt.Errorf("ABI pack error: %v", err)
+		return false, fmt.Errorf("ABI pack error: %w", err)
 	}
 
 	targetAddr := common.HexToAddress(targetContract)
@@ -216,26 +191,17 @@ func (c *EVMClient) callVerify(ctx context.Context, targetContract string, vaaBy
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	// Make the call
-	_, err = c.client.CallContract(ctxWithTimeout, msg, nil)
+	result, err := c.client.CallContract(ctxWithTimeout, msg, nil)
 	if err != nil {
-		// Check if it's a revert error
-		if revertErr, ok := err.(interface {
-			Error() string
-			ErrorData() []byte
-		}); ok {
-			revertData := revertErr.ErrorData()
-			reason, decodeErr := abi.UnpackRevert(revertData)
-			if decodeErr == nil {
-				logger.Debug("Contract reverted with reason", zap.String("reason", reason))
-				return false, fmt.Errorf("contract revert: %s", reason)
-			}
-		}
-		return false, fmt.Errorf("verification failed: %v", err)
+		return false, fmt.Errorf("contract call failed: %w", err)
 	}
 
-	// If we reach here, the verification succeeded (no error means it passed)
-	return true, nil
+	// Extract the "valid" boolean from the result
+	if len(result) >= 64 {
+		return result[63] == 1, nil // Check the last byte of the second 32-byte word
+	}
+
+	return false, fmt.Errorf("unexpected result format")
 }
 
 // Relayer coordinates processing VAAs from the spy service
@@ -248,19 +214,19 @@ type Relayer struct {
 
 // NewRelayer creates a new relayer instance
 func NewRelayer(config Config) (*Relayer, error) {
-	logger.Info("Initializing relayer")
+	log.Println("[Relayer] Initializing...")
 
 	// Connect to the spy service
 	spyClient, err := NewSpyClient(config.SpyRPCHost)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create spy client: %v", err)
+		return nil, fmt.Errorf("failed to create spy client: %w", err)
 	}
 
 	// Connect to the EVM chain
 	evmClient, err := NewEVMClient(config.DestRPCURL, config.PrivateKey)
 	if err != nil {
 		spyClient.Close()
-		return nil, fmt.Errorf("failed to create EVM client: %v", err)
+		return nil, fmt.Errorf("failed to create EVM client: %w", err)
 	}
 
 	relayer := &Relayer{
@@ -287,11 +253,9 @@ func (r *Relayer) Close() {
 
 // Start begins listening for VAAs and processing them
 func (r *Relayer) Start(ctx context.Context) error {
-	logger.Info("Starting relayer",
-		zap.String("address", r.evmClient.GetAddress().Hex()),
-		zap.Uint16("sourceChain", r.config.SourceChainID),
-		zap.Uint16("destChain", r.config.DestChainID),
-		zap.String("emitter", r.config.EmitterAddress))
+	log.Printf("[Relayer] Starting with address: %s", r.evmClient.GetAddress().Hex())
+	log.Printf("[Relayer] Filtering for VAAs from chain %d to chain %d", r.config.SourceChainID, r.config.DestChainID)
+	log.Printf("[Relayer] Monitoring emitter address: %s", r.config.EmitterAddress)
 
 	// Create a wait group to track goroutines
 	var wg sync.WaitGroup
@@ -302,7 +266,7 @@ func (r *Relayer) Start(ctx context.Context) error {
 		return fmt.Errorf("subscribe to VAA stream: %v", err)
 	}
 
-	logger.Info("Listening for VAAs")
+	log.Println("[Relayer] Listening for VAAs...")
 
 	// Create a separate context for graceful shutdown
 	processingCtx, cancelProcessing := context.WithCancel(context.Background())
@@ -311,19 +275,19 @@ func (r *Relayer) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("Shutting down relayer")
+			log.Println("[Relayer] Shutting down relayer.")
 			// Cancel all processing
 			cancelProcessing()
 			// Wait for all processing goroutines to complete
-			logger.Info("Waiting for all VAA processing to complete")
+			log.Println("[Relayer] Waiting for all VAA processing to complete...")
 			wg.Wait()
-			logger.Info("All VAA processing completed, shutdown complete")
+			log.Println("[Relayer] All VAA processing completed, shutdown complete.")
 			return nil
 		default:
 			// Receive the next VAA
 			resp, err := stream.Recv()
 			if err != nil {
-				logger.Warn("Stream error, retrying in 5s", zap.Error(err))
+				log.Printf("[Relayer] Stream error: %v. Retrying in 5s...", err)
 				time.Sleep(5 * time.Second)
 				stream, err = r.spyClient.SubscribeSignedVAA(ctx)
 				if err != nil {
@@ -348,21 +312,12 @@ func (r *Relayer) Start(ctx context.Context) error {
 
 // processVAA processes a received VAA
 func (r *Relayer) processVAA(ctx context.Context, vaaBytes []byte) {
-	// Check for context cancellation first
-	select {
-	case <-ctx.Done():
-		logger.Debug("Processing cancelled for VAA")
-		return
-	default:
-		// Continue processing
-	}
-
-	logger.Debug("Received VAA", zap.Int("bytes", len(vaaBytes)))
+	log.Printf("[Relayer] Received VAA (%d bytes)", len(vaaBytes))
 
 	// Parse the VAA
 	wormholeVAA, err := vaaLib.Unmarshal(vaaBytes)
 	if err != nil {
-		logger.Error("Failed to parse VAA", zap.Error(err))
+		log.Printf("[Relayer] Failed to parse VAA: %v", err)
 		return
 	}
 
@@ -371,72 +326,51 @@ func (r *Relayer) processVAA(ctx context.Context, vaaBytes []byte) {
 		VAA:        wormholeVAA,
 		RawBytes:   vaaBytes,
 		ChainID:    uint16(wormholeVAA.EmitterChain),
-		EmitterHex: fmt.Sprintf("%064x", wormholeVAA.EmitterAddress),
+		EmitterHex: hex.EncodeToString(wormholeVAA.EmitterAddress[:]),
 		Sequence:   wormholeVAA.Sequence,
 	}
 
-	logger.Info("VAA info",
-		zap.Uint16("chain", vaaData.ChainID),
-		zap.Uint64("sequence", vaaData.Sequence),
-		zap.String("emitter", vaaData.EmitterHex))
+	log.Printf("[Relayer] VAA info — Chain: %d | Seq: %d | Emitter: %s",
+		vaaData.ChainID, vaaData.Sequence, vaaData.EmitterHex)
 
-	// Use the passed context when calling the processor
+	// Process the VAA with the configured processor
 	if err := r.vaaProcessor(r, vaaData); err != nil {
-		logger.Error("Error processing VAA", zap.Error(err))
+		log.Printf("[Relayer] Error processing VAA: %v", err)
 	}
 }
 
 // defaultVAAProcessor is the default VAA processing logic
 func defaultVAAProcessor(r *Relayer, vaaData *VAAData) error {
-	// Create a context with timeout for processing operations
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	// Check if this is a VAA from the source chain
+	// Check if this is a VAA from the source chain (chain ID 52)
 	if vaaData.ChainID == r.config.SourceChainID {
-		logger.Info("Processing VAA from source chain",
-			zap.Uint64("sequence", vaaData.Sequence),
-			zap.Uint16("sourceChain", vaaData.ChainID))
+		log.Printf("[Processor] Processing VAA %d from source chain %d",
+			vaaData.Sequence, vaaData.ChainID)
 
-		// Verify the VAA
-		logger.Info("Verifying VAA", zap.Uint64("sequence", vaaData.Sequence))
-
-		isValid, err := r.evmClient.callVerify(ctx, r.config.TargetContract, vaaData.RawBytes)
+		// The original verification logic for source chain
+		log.Println("[Processor] Verifying VAA...")
+		isValid, err := r.evmClient.parseAndVerifyVM(context.Background(), r.config.TargetContract, vaaData.RawBytes)
 		if err != nil {
-			// Check if the context was cancelled or timed out
-			if ctx.Err() != nil {
-				logger.Warn("VAA verification cancelled or timed out", zap.Error(ctx.Err()))
-				return fmt.Errorf("verification interrupted: %v", ctx.Err())
-			}
-
-			logger.Error("Verification failed",
-				zap.Uint64("sequence", vaaData.Sequence),
-				zap.Error(err))
-			return fmt.Errorf("verification failed: %v", err)
+			return fmt.Errorf("Verification failed: %w", err)
 		}
 
 		if isValid {
-			logger.Info("VAA verification completed successfully",
-				zap.Uint64("sequence", vaaData.Sequence))
+			log.Printf("[Processor] ✅ VAA with sequence %d is valid", vaaData.Sequence)
 		} else {
-			logger.Warn("VAA verification failed, not valid",
-				zap.Uint64("sequence", vaaData.Sequence))
+			log.Printf("[Processor] ❌ VAA with sequence %d is invalid", vaaData.Sequence)
 		}
+
 		return nil
 	}
 
-	// Check if this is a VAA for the destination chain
-	if vaaData.ChainID == r.config.DestChainID {
-		logger.Info("Received VAA for destination chain",
-			zap.Uint16("chain", vaaData.ChainID),
-			zap.Uint64("sequence", vaaData.Sequence))
+	// Check if this is a VAA for the destination chain (chain ID 52)
+	if vaaData.ChainID == r.config.DestChainID && r.config.DestChainID == 52 {
+		log.Println("[Processor] Destination chain logic not yet implemented...")
 		return nil
 	}
 
 	// If neither source nor destination match our criteria, skip this VAA
-	logger.Debug("Skipping VAA (not configured for processing)",
-		zap.Uint64("sequence", vaaData.Sequence),
-		zap.Uint16("chain", vaaData.ChainID))
+	log.Printf("[Processor] ⚠️ Skipping VAA %d from chain %d (not configured for processing)",
+		vaaData.Sequence, vaaData.ChainID)
 	return nil
 }
 
@@ -457,20 +391,14 @@ func getEnvIntOrDefault(key string, defaultValue int) int {
 	var result int
 	_, err := fmt.Sscanf(val, "%d", &result)
 	if err != nil {
-		logger.Warn("Invalid environment variable value, using default",
-			zap.String("key", key),
-			zap.Int("default", defaultValue))
+		log.Printf("Warning: Invalid value for %s, using default", key)
 		return defaultValue
 	}
 	return result
 }
 
 func main() {
-	// Initialize the logger first
-	initLogger()
-	defer logger.Sync()
-
-	logger.Info("Starting Wormhole relayer")
+	log.Println("[Main] Starting Wormhole relayer...")
 
 	// Load configuration from environment
 	config := NewConfigFromEnv()
@@ -478,7 +406,7 @@ func main() {
 	// Create relayer
 	relayer, err := NewRelayer(config)
 	if err != nil {
-		logger.Fatal("Failed to initialize relayer", zap.Error(err))
+		log.Fatalf("[Main] Failed to initialize relayer: %v", err)
 	}
 	defer relayer.Close()
 
@@ -491,12 +419,12 @@ func main() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
-		logger.Info("Received shutdown signal")
+		log.Println("[Main] Received shutdown signal...")
 		cancel()
 	}()
 
 	// Start the relayer
 	if err := relayer.Start(ctx); err != nil {
-		logger.Fatal("Relayer stopped with error", zap.Error(err))
+		log.Fatalf("[Main] Relayer stopped with error: %v", err)
 	}
 }
