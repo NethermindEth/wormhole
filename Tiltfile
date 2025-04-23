@@ -994,7 +994,7 @@ if aptos:
         labels = ["aptos"],
         trigger_mode = trigger_mode,
     )
-    
+
 if aztec:
     k8s_yaml_with_ns("devnet/aztec-devnet.yaml")
     k8s_resource(
