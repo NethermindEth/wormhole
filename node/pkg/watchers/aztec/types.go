@@ -34,10 +34,12 @@ type PendingObservation struct {
 	SubmitTime    time.Time
 }
 
-// BlockInfo represents essential information about a block
+// BlockInfo enhanced to include block hash and parent hash
 type BlockInfo struct {
-	TxHash    string
-	Timestamp uint64
+	TxHash     string
+	Timestamp  uint64
+	BlockHash  string
+	ParentHash string
 }
 
 // FinalizedBlock represents a finalized block's information
