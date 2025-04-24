@@ -109,8 +109,6 @@ func (f *aztecBlockFetcher) FetchBlockInfo(ctx context.Context, blockNumber int)
 		"id":      1,
 	}
 
-	// Removed debug log for fetching block info
-
 	responseBody, err := f.client.DoRequest(ctx, f.rpcURL, payload)
 	if err != nil {
 		return BlockInfo{}, fmt.Errorf("failed to fetch block info: %v", err)
@@ -127,6 +125,12 @@ func (f *aztecBlockFetcher) FetchBlockInfo(ctx context.Context, blockNumber int)
 
 	info := BlockInfo{}
 
+	// Set the block hash using the archive root
+	info.BlockHash = response.Result.Archive.Root
+
+	// Set the parent hash using lastArchive.root
+	info.ParentHash = response.Result.Header.LastArchive.Root
+
 	// Get the timestamp from global variables (remove 0x prefix and convert from hex)
 	timestampHex := strings.TrimPrefix(response.Result.Header.GlobalVariables.Timestamp, "0x")
 	timestamp, err := strconv.ParseUint(timestampHex, 16, 64)
@@ -142,9 +146,15 @@ func (f *aztecBlockFetcher) FetchBlockInfo(ctx context.Context, blockNumber int)
 	if len(response.Result.Body.TxEffects) > 0 {
 		info.TxHash = response.Result.Body.TxEffects[0].TxHash
 	} else {
-		// If no transactions, use the block's archive root as a fallback identifier
-		info.TxHash = response.Result.Archive.Root
+		// If no transactions, use a placeholder
+		info.TxHash = "0x0"
 	}
+
+	// Log the block hash and parent hash for debugging
+	f.logger.Debug("Fetched block info",
+		zap.Int("blockNumber", blockNumber),
+		zap.String("blockHash", info.BlockHash),
+		zap.String("parentHash", info.ParentHash))
 
 	return info, nil
 }

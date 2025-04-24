@@ -99,16 +99,51 @@ type BlockArchive struct {
 }
 
 type BlockHeader struct {
-	GlobalVariables GlobalVariables `json:"globalVariables"`
+	LastArchive       BlockArchive      `json:"lastArchive"`
+	ContentCommitment ContentCommitment `json:"contentCommitment"`
+	State             State             `json:"state"`
+	GlobalVariables   GlobalVariables   `json:"globalVariables"`
+	TotalFees         string            `json:"totalFees"`
+	TotalManaUsed     string            `json:"totalManaUsed"`
+}
+
+type ContentCommitment struct {
+	NumTxs    string `json:"numTxs"`
+	BlobsHash string `json:"blobsHash"`
+	InHash    string `json:"inHash"`
+	OutHash   string `json:"outHash"`
+}
+
+type State struct {
+	L1ToL2MessageTree MerkleTree   `json:"l1ToL2MessageTree"`
+	Partial           PartialState `json:"partial"`
+}
+
+type PartialState struct {
+	NoteHashTree   MerkleTree `json:"noteHashTree"`
+	NullifierTree  MerkleTree `json:"nullifierTree"`
+	PublicDataTree MerkleTree `json:"publicDataTree"`
+}
+
+type MerkleTree struct {
+	Root                   string `json:"root"`
+	NextAvailableLeafIndex int    `json:"nextAvailableLeafIndex"`
 }
 
 type GlobalVariables struct {
-	ChainID     string `json:"chainId"`
-	Version     string `json:"version"`
-	BlockNumber string `json:"blockNumber"`
-	SlotNumber  string `json:"slotNumber"`
-	Timestamp   string `json:"timestamp"`
-	Coinbase    string `json:"coinbase"`
+	ChainID      string  `json:"chainId"`
+	Version      string  `json:"version"`
+	BlockNumber  string  `json:"blockNumber"`
+	SlotNumber   string  `json:"slotNumber"`
+	Timestamp    string  `json:"timestamp"`
+	Coinbase     string  `json:"coinbase"`
+	FeeRecipient string  `json:"feeRecipient"`
+	GasFees      GasFees `json:"gasFees"`
+}
+
+type GasFees struct {
+	FeePerDaGas string `json:"feePerDaGas"`
+	FeePerL2Gas string `json:"feePerL2Gas"`
 }
 
 type BlockBody struct {
@@ -116,7 +151,21 @@ type BlockBody struct {
 }
 
 type TxEffect struct {
-	TxHash string `json:"txHash"`
+	RevertCode        int               `json:"revertCode"`
+	TxHash            string            `json:"txHash"`
+	TransactionFee    string            `json:"transactionFee"`
+	NoteHashes        []string          `json:"noteHashes"`
+	Nullifiers        []string          `json:"nullifiers"`
+	L2ToL1Msgs        []string          `json:"l2ToL1Msgs"`
+	PublicDataWrites  []PublicDataWrite `json:"publicDataWrites"`
+	PrivateLogs       []interface{}     `json:"privateLogs"`
+	PublicLogs        []interface{}     `json:"publicLogs"`
+	ContractClassLogs []interface{}     `json:"contractClassLogs"`
+}
+
+type PublicDataWrite struct {
+	LeafSlot string `json:"leafSlot"`
+	Value    string `json:"value"`
 }
 
 type LogId struct {
