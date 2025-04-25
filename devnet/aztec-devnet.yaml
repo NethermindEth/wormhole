@@ -10,7 +10,7 @@ spec:
       port: 8090
       targetPort: 8090
     - name: anvil        
-      port: 8545         
+      port: 8549        
       targetPort: 8545   
   selector:
     app: aztec-sandbox
