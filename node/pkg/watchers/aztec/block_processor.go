@@ -12,13 +12,14 @@ import (
 func (w *Watcher) processBlocks(ctx context.Context) error {
 	w.logger.Info("Starting Aztec event processor with reorg handling")
 
+	ticker := time.NewTicker(w.config.LogProcessingInterval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
-			time.Sleep(w.config.LogProcessingInterval)
-
+		case <-ticker.C:
 			// Get the latest block number and hash
 			latestBlock, err := w.blockFetcher.FetchLatestBlockNumber(ctx)
 			if err != nil {
@@ -39,29 +40,6 @@ func (w *Watcher) processBlocks(ctx context.Context) error {
 				w.logger.Error("Error syncing chain", zap.Error(err))
 				// Continue instead of returning to maintain service
 			}
-		}
-	}
-}
-
-// runBlockPruner periodically prunes old blocks
-func (w *Watcher) runBlockPruner(ctx context.Context) error {
-	w.logger.Info("Starting Aztec block pruner")
-
-	// Run pruning every hour or as configured
-	pruneInterval := 1 * time.Hour
-	if w.config.BlockPruneInterval > 0 {
-		pruneInterval = w.config.BlockPruneInterval
-	}
-
-	ticker := time.NewTicker(pruneInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			w.pruneProcessedBlocks(ctx)
 		}
 	}
 }
@@ -144,60 +122,59 @@ func (w *Watcher) processBlockWithReorgHandling(ctx context.Context, blockNumber
 	}
 
 	// Add this block to our tracking
-	w.appendProcessedBlock(processedBlock)
+	w.addProcessedBlock(processedBlock)
 
 	return nil
 }
 
 // verifyBlockParent ensures a block connects to our known chain
 func (w *Watcher) verifyBlockParent(blockInfo BlockInfo, blockNumber int) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	// For the genesis block (block 0) and the first block, no parent verification is needed
 	if blockNumber <= 1 || len(w.processedBlocks) == 0 {
 		return true
 	}
 
-	// Get the expected parent block
-	parentNumber := blockNumber - 1
+	// Look up the parent block directly by its hash - O(1) operation
+	parentBlock := w.getBlockByHash(blockInfo.ParentHash)
 
-	// Find the parent block in our processed blocks
-	var parentBlock *ProcessedBlock
-	for i := len(w.processedBlocks) - 1; i >= 0; i-- {
-		if w.processedBlocks[i].Number == parentNumber && w.processedBlocks[i].IsCanonical {
-			parentBlock = w.processedBlocks[i]
-			break
+	// If we found the parent by hash, ensure it's canonical
+	if parentBlock != nil {
+		if !parentBlock.IsCanonical {
+			w.logger.Warn("Block parent found but is not canonical",
+				zap.Int("blockNumber", blockNumber),
+				zap.String("parentHash", blockInfo.ParentHash))
+			return false
 		}
+		return true
+	}
+
+	// If we didn't find the parent by hash, fall back to finding by number
+	// This is a safety mechanism for potential race conditions
+	canonicalParent := w.getCanonicalBlockAtHeight(blockNumber - 1)
+	if canonicalParent != nil {
+		w.logger.Warn("Parent hash not found in our history, but found block at height",
+			zap.Int("blockNumber", blockNumber),
+			zap.String("expectedParentHash", blockInfo.ParentHash),
+			zap.String("foundParentHash", canonicalParent.Hash))
+		return false
 	}
 
 	// If we don't have the parent, we can't verify
-	if parentBlock == nil {
-		w.logger.Warn("Cannot verify block parent, parent not in our history",
-			zap.Int("blockNumber", blockNumber),
-			zap.Int("parentNumber", parentNumber))
-		return true // Assume it's OK and continue
-	}
+	w.logger.Warn("Cannot verify block parent, parent not in our history",
+		zap.Int("blockNumber", blockNumber),
+		zap.String("parentHash", blockInfo.ParentHash))
 
-	// Verify the parent hash matches
-	parentHashMatches := blockInfo.ParentHash == parentBlock.Hash
-
-	if !parentHashMatches {
-		w.logger.Warn("Block parent hash mismatch detected",
-			zap.Int("blockNumber", blockNumber),
-			zap.String("expectedParentHash", parentBlock.Hash),
-			zap.String("actualParentHash", blockInfo.ParentHash))
-	}
-
-	return parentHashMatches
+	// Assume it's OK and continue
+	return true
 }
 
-// appendProcessedBlock adds a block to our tracking
-func (w *Watcher) appendProcessedBlock(block *ProcessedBlock) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
+// addProcessedBlock adds a block to both the slice and map for O(1) lookups
+func (w *Watcher) addProcessedBlock(block *ProcessedBlock) {
+	// Add to the slice
 	w.processedBlocks = append(w.processedBlocks, block)
+
+	// Add to the map for O(1) lookups by hash
+	w.blocksByHash[block.Hash] = block
 
 	// Log at appropriate level based on observations
 	if len(block.Observations) > 0 {
@@ -245,4 +222,22 @@ func (w *Watcher) processBlockLogs(ctx context.Context, blockNumber int, blockIn
 	}
 
 	return observations, nil
+}
+
+// getBlockByHash returns a processed block by its hash for O(1) lookup
+func (w *Watcher) getBlockByHash(hash string) *ProcessedBlock {
+	return w.blocksByHash[hash]
+}
+
+// getCanonicalBlockAtHeight returns the canonical block at the specified height
+// This is slower but needed for certain operations
+func (w *Watcher) getCanonicalBlockAtHeight(height int) *ProcessedBlock {
+	// Iterate through the slice (could optimize this in future by maintaining a height index)
+	for i := len(w.processedBlocks) - 1; i >= 0; i-- {
+		block := w.processedBlocks[i]
+		if block.Number == height && block.IsCanonical {
+			return block
+		}
+	}
+	return nil
 }

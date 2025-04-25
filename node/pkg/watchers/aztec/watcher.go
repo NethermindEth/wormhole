@@ -21,6 +21,7 @@ type Watcher struct {
 	// Chain tracking for reorg detection
 	mu              sync.Mutex
 	processedBlocks []*ProcessedBlock
+	blocksByHash    map[string]*ProcessedBlock // Map for O(1) lookups by hash
 	lastBlockNumber int
 	reorgDepth      int // Track deepest reorg for metrics
 }
@@ -65,12 +66,13 @@ func NewWatcher(
 		msgC:               msgC,
 		logger:             logger,
 		processedBlocks:    make([]*ProcessedBlock, 0),
-		lastBlockNumber:    config.StartBlock - 1, // Will process StartBlock first
+		blocksByHash:       make(map[string]*ProcessedBlock), // Initialize hash map
+		lastBlockNumber:    config.StartBlock - 1,            // Will process StartBlock first
 		reorgDepth:         0,
 	}
 }
 
-// Run starts the watcher and processes blocks
+// Run starts the watcher with a single goroutine
 func (w *Watcher) Run(ctx context.Context) error {
 	w.logger.Info("Starting Aztec watcher",
 		zap.String("rpc", w.config.RpcURL),
@@ -80,19 +82,9 @@ func (w *Watcher) Run(ctx context.Context) error {
 	errC := make(chan error)
 	defer close(errC)
 
-	// Start the block processing goroutine
-	common.RunWithScissors(ctx, errC, "aztec_events", func(ctx context.Context) error {
-		return w.processBlocks(ctx)
-	})
-
-	// Start the finality checker goroutine
-	common.RunWithScissors(ctx, errC, "aztec_finality_checker", func(ctx context.Context) error {
-		return w.checkFinality(ctx)
-	})
-
-	// Start periodic block pruning goroutine
-	common.RunWithScissors(ctx, errC, "aztec_block_pruner", func(ctx context.Context) error {
-		return w.runBlockPruner(ctx)
+	// Start a single goroutine that handles all operations
+	common.RunWithScissors(ctx, errC, "aztec_unified_processor", func(ctx context.Context) error {
+		return w.unifiedProcessor(ctx)
 	})
 
 	// Wait for context cancellation or error
@@ -101,5 +93,41 @@ func (w *Watcher) Run(ctx context.Context) error {
 		return ctx.Err()
 	case err := <-errC:
 		return err
+	}
+}
+
+// unifiedProcessor handles all operations in a single goroutine
+func (w *Watcher) unifiedProcessor(ctx context.Context) error {
+	// Track last execution times
+	lastFinalityCheck := time.Now()
+	lastBlockPrune := time.Now()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			// Process blocks (core functionality)
+			if err := w.processBlocks(ctx); err != nil {
+				w.logger.Error("Error processing blocks", zap.Error(err))
+			}
+
+			// Check finality (if enough time has passed)
+			if time.Since(lastFinalityCheck) >= w.config.FinalityCheckInterval {
+				if err := w.processFinality(ctx); err != nil {
+					w.logger.Error("Error checking finality", zap.Error(err))
+				}
+				lastFinalityCheck = time.Now()
+			}
+
+			// Prune blocks (if enough time has passed)
+			if time.Since(lastBlockPrune) >= w.config.BlockPruneInterval {
+				w.pruneProcessedBlocks(ctx)
+				lastBlockPrune = time.Now()
+			}
+		}
 	}
 }

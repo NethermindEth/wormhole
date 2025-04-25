@@ -130,9 +130,6 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 
 // GetProcessedBlockByNumber returns a processed block by its number
 func (w *Watcher) GetProcessedBlockByNumber(blockNumber int) *ProcessedBlock {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	for i := len(w.processedBlocks) - 1; i >= 0; i-- {
 		if w.processedBlocks[i].Number == blockNumber {
 			return w.processedBlocks[i]

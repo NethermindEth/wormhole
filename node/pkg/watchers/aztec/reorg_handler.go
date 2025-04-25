@@ -9,9 +9,6 @@ import (
 
 // detectReorg checks if a reorganization has occurred
 func (w *Watcher) detectReorg(ctx context.Context) (bool, int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	// If we haven't processed any blocks yet, there's no reorg to detect
 	if len(w.processedBlocks) == 0 {
 		return false, 0
@@ -87,16 +84,12 @@ func (w *Watcher) findCommonAncestor(ctx context.Context, startIdx int) int {
 	}
 
 	// If we couldn't find a common ancestor, start from genesis
-	// Since we keep always everything from last finalized block and frontwards
-	// We should never reach this point theoretically, but it's a safeguard.
 	w.logger.Warn("Could not find common ancestor, reverting to genesis block")
 	return w.config.StartBlock - 1
 }
 
 // handleChainReorg processes a detected chain reorganization
 func (w *Watcher) handleChainReorg(ctx context.Context, commonAncestor int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
 
 	w.logger.Info("Handling chain reorganization",
 		zap.Int("commonAncestor", commonAncestor),
@@ -110,6 +103,9 @@ func (w *Watcher) handleChainReorg(ctx context.Context, commonAncestor int) {
 		if block.Number > commonAncestor && block.IsCanonical {
 			// Mark this block as non-canonical
 			block.IsCanonical = false
+
+			// Update the map entry (no need to delete since we keep track of IsCanonical)
+			w.blocksByHash[block.Hash] = block
 
 			// Invalidate all observations in this block
 			for _, obs := range block.Observations {
@@ -138,20 +134,13 @@ func (w *Watcher) handleChainReorg(ctx context.Context, commonAncestor int) {
 	// Update the lastBlockNumber to the common ancestor
 	w.lastBlockNumber = commonAncestor
 
-	// Unlock mutex before calling pruneProcessedBlocks which will acquire it again
-	w.mu.Unlock()
 	// Clean up and retain only the blocks after the finalized one
 	w.pruneProcessedBlocks(ctx)
-	// Reacquire mutex as deferred unlock expects it
-	w.mu.Lock()
 }
 
 // pruneProcessedBlocks removes old blocks to save memory while keeping all potentially reorg-able blocks
 // We always keep the chain from the last finalized block and frontwards.
 func (w *Watcher) pruneProcessedBlocks(ctx context.Context) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	// First, find out what the latest finalized block is
 	finalizedBlock, err := w.l1Verifier.GetFinalizedBlock(ctx)
 	if err != nil {
@@ -178,7 +167,14 @@ func (w *Watcher) pruneProcessedBlocks(ctx context.Context) {
 
 	// Keep the finalized block and all blocks after it
 	if finalizedBlockIdx > 0 {
+		// Remove entries from the hash map for blocks being pruned
+		for i := 0; i < finalizedBlockIdx; i++ {
+			delete(w.blocksByHash, w.processedBlocks[i].Hash)
+		}
+
+		// Update the slice
 		w.processedBlocks = w.processedBlocks[finalizedBlockIdx:]
+
 		w.logger.Debug("Pruned processed blocks",
 			zap.Int("prunedCount", finalizedBlockIdx),
 			zap.Int("remainingCount", len(w.processedBlocks)),

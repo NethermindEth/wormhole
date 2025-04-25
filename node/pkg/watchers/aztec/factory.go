@@ -2,7 +2,6 @@ package aztec
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/certusone/wormhole/node/pkg/common"
@@ -133,8 +132,6 @@ func NewWatcherFromConfig(
 			processedBlocks: make([]*ProcessedBlock, 0),
 			lastBlockNumber: config.StartBlock - 1, // Will process StartBlock first
 			reorgDepth:      0,
-			// Initialize mutex (not needed in struct initialization, but included for completeness)
-			mu: sync.Mutex{},
 		}
 
 		// Signal initialization complete

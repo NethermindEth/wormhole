@@ -91,10 +91,8 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog, bloc
 // hasObservationBeenPublished checks if we've already published this observation
 func (w *Watcher) hasObservationBeenPublished(id string) bool {
 	// Take a snapshot of blocks under mutex
-	w.mu.Lock()
 	blocksCopy := make([]*ProcessedBlock, len(w.processedBlocks))
 	copy(blocksCopy, w.processedBlocks)
-	w.mu.Unlock()
 
 	// Check outside the mutex
 	for _, block := range blocksCopy {
@@ -116,10 +114,8 @@ func (w *Watcher) hasObservationBeenPublished(id string) bool {
 
 func (w *Watcher) isReobservation(emitter vaa.Address, sequence uint64) bool {
 	// Take a snapshot of blocks under mutex
-	w.mu.Lock()
 	blocksCopy := make([]*ProcessedBlock, len(w.processedBlocks))
 	copy(blocksCopy, w.processedBlocks)
-	w.mu.Unlock()
 
 	// Check if we've already published a message with this emitter+sequence
 	for _, block := range blocksCopy {
@@ -141,9 +137,6 @@ func (w *Watcher) isReobservation(emitter vaa.Address, sequence uint64) bool {
 
 // recordPublishedObservation records that an observation has been published
 func (w *Watcher) recordPublishedObservation(id string, params LogParameters) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	// Find the observation in our blocks and mark it as published
 	for _, block := range w.processedBlocks {
 		for _, obs := range block.Observations {
