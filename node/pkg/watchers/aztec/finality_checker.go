@@ -43,10 +43,11 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 	// Get the latest finalized block
 	finalizedBlock, err := w.l1Verifier.GetFinalizedBlock(ctx)
 	if err != nil {
-		// We can't determine finality, so just log and return
+		// Handle the error locally instead of returning it to prevent goroutine exit
 		w.logger.Warn("Failed to get finalized block, will retry later",
 			zap.Error(err))
-		return err
+		// Continue with the next iteration rather than exiting
+		return nil
 	}
 
 	w.logger.Debug("Checking against finalized block", zap.Int("finalized_block", finalizedBlock.Number))

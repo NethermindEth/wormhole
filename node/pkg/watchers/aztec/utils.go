@@ -81,12 +81,6 @@ func GetJSONRPCError(body []byte) (bool, *ErrRPCError) {
 	}
 }
 
-// IsRetryableRPCError determines if an RPC error should be retried
-// Generally server errors (code < -32000) are retryable
-func IsRetryableRPCError(err *ErrRPCError) bool {
-	return err.Code >= -32099 && err.Code <= -32000
-}
-
 // CreateObservationID creates a unique ID for tracking pending observations
 func CreateObservationID(senderAddress string, sequence uint64, blockNumber int) string {
 	return fmt.Sprintf("%s-%d-%d", senderAddress, sequence, blockNumber)

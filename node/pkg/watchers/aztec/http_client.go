@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -104,14 +106,20 @@ func (c *httpClient) doRequestWithRetry(ctx context.Context, req *http.Request) 
 				zap.Error(err))
 			lastErr = err
 
-			// Wait before retrying
+			// Always retry on network errors
 			if retry < c.maxRetries {
-				select {
-				case <-time.After(backoff):
-					backoff = time.Duration(float64(backoff) * c.backoffMultiplier)
-					continue
-				case <-ctx.Done():
-					return nil, ctx.Err()
+				// Check error type to determine if it's a network error worth retrying
+				if isRetryableNetworkError(err) {
+					c.logger.Debug("Network error detected, will retry",
+						zap.Error(err),
+						zap.Int("attempt", retry+1))
+					select {
+					case <-time.After(backoff):
+						backoff = time.Duration(float64(backoff) * c.backoffMultiplier)
+						continue
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
 				}
 			}
 			return nil, fmt.Errorf("request error after %d attempts: %v", retry+1, err)
@@ -129,8 +137,8 @@ func (c *httpClient) doRequestWithRetry(ctx context.Context, req *http.Request) 
 
 			lastErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 
-			// Retry on server errors (5xx)
-			if resp.StatusCode >= 500 && retry < c.maxRetries {
+			// Retry on server errors (5xx) and some client errors that might be temporary
+			if (resp.StatusCode >= 500 || resp.StatusCode == 429) && retry < c.maxRetries {
 				select {
 				case <-time.After(backoff):
 					backoff = time.Duration(float64(backoff) * c.backoffMultiplier)
@@ -194,4 +202,43 @@ func (c *httpClient) doRequestWithRetry(ctx context.Context, req *http.Request) 
 	}
 
 	return nil, &ErrMaxRetriesExceeded{Method: method}
+}
+
+// isRetryableNetworkError determines if a network error should be retried
+func isRetryableNetworkError(err error) bool {
+	// Check for common network errors worth retrying
+	if netErr, ok := err.(net.Error); ok {
+		// Retry on timeout errors
+		if netErr.Timeout() {
+			return true
+		}
+		// Retry on temporary errors
+		if netErr.Temporary() {
+			return true
+		}
+	}
+
+	// Check if the error is related to connection issues
+	errStr := err.Error()
+	return strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "i/o timeout") ||
+		strings.Contains(errStr, "connection reset by peer") ||
+		strings.Contains(errStr, "EOF") ||
+		strings.Contains(errStr, "connection closed") ||
+		strings.Contains(errStr, "broken pipe")
+}
+
+// IsRetryableRPCError determines if an RPC error should be retried
+// Both server errors and rate limiting errors are retryable
+func IsRetryableRPCError(err *ErrRPCError) bool {
+	// Server error codes -32000 to -32099
+	isServerError := err.Code >= -32099 && err.Code <= -32000
+
+	// Rate limiting errors (specific to Aztec, adjust if needed)
+	isRateLimit := err.Code == -32005 ||
+		strings.Contains(strings.ToLower(err.Msg), "rate limit") ||
+		strings.Contains(strings.ToLower(err.Msg), "too many requests")
+
+	return isServerError || isRateLimit
 }
