@@ -103,29 +103,3 @@ func (w *Watcher) Run(ctx context.Context) error {
 		return err
 	}
 }
-
-// GetProcessedBlockByNumber returns a processed block by its number
-func (w *Watcher) GetProcessedBlockByNumber(blockNumber int) *ProcessedBlock {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	for i := len(w.processedBlocks) - 1; i >= 0; i-- {
-		if w.processedBlocks[i].Number == blockNumber {
-			return w.processedBlocks[i]
-		}
-	}
-	return nil
-}
-
-// GetLatestCanonicalBlock returns the latest block in the canonical chain
-func (w *Watcher) GetLatestCanonicalBlock() *ProcessedBlock {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	for i := len(w.processedBlocks) - 1; i >= 0; i-- {
-		if w.processedBlocks[i].IsCanonical {
-			return w.processedBlocks[i]
-		}
-	}
-	return nil
-}

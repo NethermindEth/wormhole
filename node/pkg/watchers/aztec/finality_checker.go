@@ -128,6 +128,19 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 	return nil
 }
 
+// GetProcessedBlockByNumber returns a processed block by its number
+func (w *Watcher) GetProcessedBlockByNumber(blockNumber int) *ProcessedBlock {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i := len(w.processedBlocks) - 1; i >= 0; i-- {
+		if w.processedBlocks[i].Number == blockNumber {
+			return w.processedBlocks[i]
+		}
+	}
+	return nil
+}
+
 // isBlockInCanonicalChain verifies if a block is still part of the canonical chain
 func (w *Watcher) isBlockInCanonicalChain(ctx context.Context, blockNumber int) bool {
 	// First check our local cache of processed blocks
