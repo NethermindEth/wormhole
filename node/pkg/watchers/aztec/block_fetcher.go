@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -133,15 +134,31 @@ func (f *aztecBlockFetcher) FetchBlockInfo(ctx context.Context, blockNumber int)
 
 	// Get the timestamp from global variables (remove 0x prefix and convert from hex)
 	timestampHex := strings.TrimPrefix(response.Result.Header.GlobalVariables.Timestamp, "0x")
-	timestamp, err := strconv.ParseUint(timestampHex, 16, 64)
-	if err != nil {
-		return BlockInfo{}, &ErrParsingFailed{
-			What: "timestamp",
-			Err:  err,
+	if timestampHex == "" {
+		// Handle empty timestamp (typically for genesis block)
+		if blockNumber == 0 {
+			// Use a default timestamp for genesis block
+			info.Timestamp = 0 // Or any appropriate value
+			f.logger.Debug("Genesis block has no timestamp, using default value")
+		} else {
+			// Use current time as fallback for non-genesis blocks
+			info.Timestamp = uint64(time.Now().Unix())
+			f.logger.Warn("Block has empty timestamp, using current time",
+				zap.Int("blockNumber", blockNumber))
 		}
+	} else {
+		// Parse the timestamp normally
+		timestamp, err := strconv.ParseUint(timestampHex, 16, 64)
+		if err != nil {
+			return BlockInfo{}, &ErrParsingFailed{
+				What: "timestamp",
+				Err:  err,
+			}
+		}
+		info.Timestamp = timestamp
 	}
-	info.Timestamp = timestamp
 
+	// svlachakis check if remove - this is used in wormhole we can't remove it.
 	// Get the transaction hash from the first transaction in the block (if available)
 	if len(response.Result.Body.TxEffects) > 0 {
 		info.TxHash = response.Result.Body.TxEffects[0].TxHash
