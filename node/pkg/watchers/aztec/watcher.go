@@ -2,7 +2,6 @@ package aztec
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/certusone/wormhole/node/pkg/common"
@@ -19,7 +18,6 @@ type Watcher struct {
 	logger             *zap.Logger
 
 	// Chain tracking for reorg detection
-	mu              sync.Mutex
 	processedBlocks []*ProcessedBlock
 	blocksByHash    map[string]*ProcessedBlock // Map for O(1) lookups by hash
 	lastBlockNumber int
@@ -33,7 +31,6 @@ type ProcessedBlock struct {
 	ParentHash   string
 	Observations []*ObservationRecord
 	Timestamp    uint64
-	IsCanonical  bool
 }
 
 // ObservationRecord represents a message that has been observed and possibly published
@@ -67,7 +64,7 @@ func NewWatcher(
 		logger:             logger,
 		processedBlocks:    make([]*ProcessedBlock, 0),
 		blocksByHash:       make(map[string]*ProcessedBlock), // Initialize hash map
-		lastBlockNumber:    config.StartBlock - 1,            // Will process StartBlock first
+		lastBlockNumber:    config.StartBlock,                // Will process StartBlock first
 		reorgDepth:         0,
 	}
 }
@@ -96,7 +93,6 @@ func (w *Watcher) Run(ctx context.Context) error {
 	}
 }
 
-// unifiedProcessor handles all operations in a single goroutine
 func (w *Watcher) unifiedProcessor(ctx context.Context) error {
 	// Track last execution times
 	lastFinalityCheck := time.Now()
@@ -105,25 +101,30 @@ func (w *Watcher) unifiedProcessor(ctx context.Context) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
+	w.logger.Info("Starting Aztec event processor with reorg handling")
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			// Process blocks (core functionality)
+			// Process blocks
 			if err := w.processBlocks(ctx); err != nil {
 				w.logger.Error("Error processing blocks", zap.Error(err))
 			}
 
-			// Check finality (if enough time has passed)
+			// Check finality
 			if time.Since(lastFinalityCheck) >= w.config.FinalityCheckInterval {
+				w.logger.Info("Finality check interval reached",
+					zap.Duration("interval", w.config.FinalityCheckInterval))
+
 				if err := w.processFinality(ctx); err != nil {
 					w.logger.Error("Error checking finality", zap.Error(err))
 				}
 				lastFinalityCheck = time.Now()
 			}
 
-			// Prune blocks (if enough time has passed)
+			// Prune blocks if needed
 			if time.Since(lastBlockPrune) >= w.config.BlockPruneInterval {
 				w.pruneProcessedBlocks(ctx)
 				lastBlockPrune = time.Now()

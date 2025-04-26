@@ -14,15 +14,12 @@ func (w *Watcher) detectReorg(ctx context.Context) (bool, int) {
 		return false, 0
 	}
 
-	// Start from our most recent canonical block and walk backwards
+	// Start from our most recent block and walk backwards
 	for i := len(w.processedBlocks) - 1; i >= 0; i-- {
 		block := w.processedBlocks[i]
-		if !block.IsCanonical {
-			continue // Skip blocks we've already marked as non-canonical
-		}
 
-		// Check if this block is still part of the canonical chain
-		blockInfo, err := w.blockFetcher.FetchBlockInfo(ctx, block.Number)
+		// Check if this block is still part of the chain
+		blockInfo, err := w.blockFetcher.FetchBlock(ctx, block.Number)
 		if err != nil {
 			w.logger.Warn("Failed to fetch block info for reorg detection",
 				zap.Int("blockNumber", block.Number),
@@ -60,13 +57,8 @@ func (w *Watcher) findCommonAncestor(ctx context.Context, startIdx int) int {
 	for i := startIdx - 1; i >= 0; i-- {
 		block := w.processedBlocks[i]
 
-		// Skip blocks we've already marked as non-canonical
-		if !block.IsCanonical {
-			continue
-		}
-
-		// Check if this block is in the canonical chain
-		blockInfo, err := w.blockFetcher.FetchBlockInfo(ctx, block.Number)
+		// Check if this block is in the chain
+		blockInfo, err := w.blockFetcher.FetchBlock(ctx, block.Number)
 		if err != nil {
 			w.logger.Warn("Failed to fetch block info while finding common ancestor",
 				zap.Int("blockNumber", block.Number),
@@ -85,57 +77,84 @@ func (w *Watcher) findCommonAncestor(ctx context.Context, startIdx int) int {
 
 	// If we couldn't find a common ancestor, start from genesis
 	w.logger.Warn("Could not find common ancestor, reverting to genesis block")
-	return w.config.StartBlock - 1
+	return w.config.StartBlock
 }
 
 // handleChainReorg processes a detected chain reorganization
 func (w *Watcher) handleChainReorg(ctx context.Context, commonAncestor int) {
+	// Initial context check
+	if ctx.Err() != nil {
+		w.logger.Warn("Chain reorg handling cancelled by context", zap.Error(ctx.Err()))
+		return
+	}
 
 	w.logger.Info("Handling chain reorganization",
 		zap.Int("commonAncestor", commonAncestor),
 		zap.Int("lastProcessedBlock", w.lastBlockNumber),
 		zap.Int("reorgDepth", w.lastBlockNumber-commonAncestor))
 
-	// Mark all blocks after the common ancestor as non-canonical
-	for i := len(w.processedBlocks) - 1; i >= 0; i-- {
-		block := w.processedBlocks[i]
+	// Remove all blocks after the common ancestor
+	var blocksToRemove []*ProcessedBlock
+	var keptBlocks []*ProcessedBlock
 
-		if block.Number > commonAncestor && block.IsCanonical {
-			// Mark this block as non-canonical
-			block.IsCanonical = false
+	// Use a non-blocking select to check context periodically without set intervals
+	for _, block := range w.processedBlocks {
+		select {
+		case <-ctx.Done():
+			w.logger.Warn("Chain reorg handling cancelled by context during block processing",
+				zap.Error(ctx.Err()))
+			return
+		default:
+			// Continue with normal processing (non-blocking)
+		}
 
-			// Update the map entry (no need to delete since we keep track of IsCanonical)
-			w.blocksByHash[block.Hash] = block
+		if block.Number > commonAncestor {
+			blocksToRemove = append(blocksToRemove, block)
 
-			// Invalidate all observations in this block
+			// Handle observations in removed blocks
 			for _, obs := range block.Observations {
 				if obs.IsPublished && !obs.IsInvalidated {
-					// Only invalidate and send notices for immediate messages
+					// Only handle for immediate messages
 					if obs.LogParameters.ConsistencyLevel < 2 {
 						obs.IsInvalidated = true
 						obs.InvalidationTime = time.Now()
 
-						w.logger.Info("Invalidating previously published observation due to reorg")
-						w.publishReobservationNotice(obs)
+						w.logger.Info("Invalidating observation from removed block")
 					} else {
-						// This should never happen if we're doing things correctly,
-						// because consistency level 2 messages should only be published
-						// after finality, and finalized blocks cannot be reorganized
-						w.logger.Error("Found published finality-requiring message in reorged block - this should not happen",
+						w.logger.Error("Found published finality-requiring message in removed block - this should not happen",
 							zap.String("id", obs.ID),
 							zap.Int("blockNumber", obs.BlockNumber),
 							zap.Uint8("consistencyLevel", obs.LogParameters.ConsistencyLevel))
 					}
 				}
 			}
+		} else {
+			keptBlocks = append(keptBlocks, block)
 		}
 	}
+
+	// Final context check before making changes
+	if ctx.Err() != nil {
+		w.logger.Warn("Chain reorg handling cancelled before finalizing changes",
+			zap.Error(ctx.Err()))
+		return
+	}
+
+	// Remove blocks from hash map
+	for _, block := range blocksToRemove {
+		delete(w.blocksByHash, block.Hash)
+	}
+
+	// Update the processed blocks slice
+	w.processedBlocks = keptBlocks
 
 	// Update the lastBlockNumber to the common ancestor
 	w.lastBlockNumber = commonAncestor
 
-	// Clean up and retain only the blocks after the finalized one
-	w.pruneProcessedBlocks(ctx)
+	w.logger.Info("Chain reorganization handling completed",
+		zap.Int("commonAncestor", commonAncestor),
+		zap.Int("removedBlocks", len(blocksToRemove)),
+		zap.Int("keptBlocks", len(keptBlocks)))
 }
 
 // pruneProcessedBlocks removes old blocks to save memory while keeping all potentially reorg-able blocks

@@ -15,8 +15,9 @@ import (
 type BlockFetcher interface {
 	FetchLatestBlockNumber(ctx context.Context) (int, error)
 	FetchPublicLogs(ctx context.Context, fromBlock, toBlock int) ([]ExtendedPublicLog, error)
-	FetchBlockInfo(ctx context.Context, blockNumber int) (BlockInfo, error)
+	FetchBlock(ctx context.Context, blockNumber int) (BlockInfo, error)
 	FetchBlockDetails(ctx context.Context, blockNumber int) (*BlockArchive, error)
+	FetchBlocks(ctx context.Context, from int, limit int) ([]BlockInfo, error)
 }
 
 // aztecBlockFetcher is the implementation of BlockFetcher
@@ -101,8 +102,8 @@ func (f *aztecBlockFetcher) FetchPublicLogs(ctx context.Context, fromBlock, toBl
 	return response.Result.Logs, nil
 }
 
-// FetchBlockInfo gets info for a specific block
-func (f *aztecBlockFetcher) FetchBlockInfo(ctx context.Context, blockNumber int) (BlockInfo, error) {
+// FetchBlock gets info for a specific block
+func (f *aztecBlockFetcher) FetchBlock(ctx context.Context, blockNumber int) (BlockInfo, error) {
 	payload := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "node_getBlock",
@@ -202,6 +203,126 @@ func (f *aztecBlockFetcher) FetchBlockDetails(ctx context.Context, blockNumber i
 	}
 
 	return &response.Result.Archive, nil
+}
+
+// FetchBlocks gets info for multiple blocks in a given range
+func (f *aztecBlockFetcher) FetchBlocks(ctx context.Context, startBlock int, limit int) ([]BlockInfo, error) {
+	if startBlock == 0 {
+		startBlock = 1
+	}
+	payload := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "node_getBlocks",
+		"params":  []any{startBlock, limit},
+		"id":      1,
+	}
+
+	responseBody, err := f.client.DoRequest(ctx, f.rpcURL, payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch blocks: %v", err)
+	}
+
+	// Parse the response
+	var response struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int    `json:"id"`
+		Result  []struct {
+			Archive struct {
+				Root string `json:"root"`
+			} `json:"archive"`
+			Header struct {
+				LastArchive struct {
+					Root string `json:"root"`
+				} `json:"lastArchive"`
+				GlobalVariables struct {
+					Timestamp string `json:"timestamp"`
+				} `json:"globalVariables"`
+			} `json:"header"`
+			Body struct {
+				TxEffects []struct {
+					TxHash string `json:"txHash"`
+				} `json:"txEffects"`
+			} `json:"body"`
+		} `json:"result"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return nil, &ErrParsingFailed{
+			What: "blocks response",
+			Err:  err,
+		}
+	}
+
+	// Check for RPC error
+	if response.Error != nil {
+		return nil, fmt.Errorf("RPC error: %s (code: %d)", response.Error.Message, response.Error.Code)
+	}
+
+	// Process each block
+	blockInfos := make([]BlockInfo, 0, len(response.Result))
+
+	for i, block := range response.Result {
+		info := BlockInfo{}
+
+		// Set the block hash using the archive root
+		info.BlockHash = block.Archive.Root
+
+		// Set the parent hash using lastArchive.root
+		info.ParentHash = block.Header.LastArchive.Root
+
+		// Get the timestamp from global variables (remove 0x prefix and convert from hex)
+		timestampHex := strings.TrimPrefix(block.Header.GlobalVariables.Timestamp, "0x")
+		if timestampHex == "" {
+			// Handle empty timestamp (typically for genesis block)
+			if startBlock+i == 0 {
+				// Use a default timestamp for genesis block
+				info.Timestamp = 0 // Or any appropriate value
+				f.logger.Debug("Genesis block has no timestamp, using default value")
+			} else {
+				// Use current time as fallback for non-genesis blocks
+				info.Timestamp = uint64(time.Now().Unix())
+				f.logger.Warn("Block has empty timestamp, using current time",
+					zap.Int("blockNumber", startBlock+i))
+			}
+		} else {
+			// Parse the timestamp normally
+			timestamp, err := strconv.ParseUint(timestampHex, 16, 64)
+			if err != nil {
+				return nil, &ErrParsingFailed{
+					What: "timestamp",
+					Err:  err,
+				}
+			}
+			info.Timestamp = timestamp
+		}
+
+		// Get the transaction hash from the first transaction in the block (if available)
+		if len(block.Body.TxEffects) > 0 {
+			info.TxHash = block.Body.TxEffects[0].TxHash
+		} else {
+			// If no transactions, use a placeholder
+			info.TxHash = "0x0"
+		}
+
+		// Log the block hash and parent hash for debugging
+		f.logger.Debug("Fetched block info",
+			zap.Int("blockNumber", startBlock+i),
+			zap.String("blockHash", info.BlockHash),
+			zap.String("parentHash", info.ParentHash))
+
+		blockInfos = append(blockInfos, info)
+	}
+
+	f.logger.Debug("Completed block fetch",
+		zap.Int("startBlock", startBlock),
+		zap.Int("limit", limit),
+		zap.Int("fetchedCount", len(blockInfos)))
+
+	return blockInfos, nil
 }
 
 // parseBlockNumber handles different formats of block number in responses

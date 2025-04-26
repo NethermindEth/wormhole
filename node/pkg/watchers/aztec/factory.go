@@ -130,7 +130,8 @@ func NewWatcherFromConfig(
 
 			// New fields for reorg handling
 			processedBlocks: make([]*ProcessedBlock, 0),
-			lastBlockNumber: config.StartBlock - 1, // Will process StartBlock first
+			blocksByHash:    make(map[string]*ProcessedBlock), // Add this line
+			lastBlockNumber: config.StartBlock,                // Will process StartBlock first
 			reorgDepth:      0,
 		}
 

@@ -10,37 +10,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// publishReobservationNotice sends a special message indicating an observation was invalidated
-func (w *Watcher) publishReobservationNotice(obs *ObservationRecord) {
-	// Convert transaction hash to byte array for txID
-	txID, err := hex.DecodeString(strings.TrimPrefix(obs.BlockInfo.TxHash, "0x"))
-	if err != nil {
-		w.logger.Error("Failed to decode transaction hash", zap.Error(err))
-		txID = []byte{0x0}
-	}
-
-	// Create a reobservation message publication
-	observation := &common.MessagePublication{
-		TxID:             txID,
-		Timestamp:        time.Unix(int64(obs.BlockInfo.Timestamp), 0),
-		Nonce:            obs.LogParameters.Nonce,
-		Sequence:         obs.LogParameters.Sequence,
-		EmitterChain:     w.config.ChainID,
-		EmitterAddress:   obs.LogParameters.SenderAddress,
-		Payload:          nil,  // Empty payload for invalidation notice
-		ConsistencyLevel: 0,    // Always immediate for invalidation notices
-		IsReobservation:  true, // Mark this as a reobservation/invalidation
-	}
-
-	w.logger.Info("Publishing invalidation notice for reorged message",
-		zap.Stringer("emitter", observation.EmitterAddress),
-		zap.Uint64("sequence", observation.Sequence),
-		zap.Time("originalTime", obs.PublishedTime))
-
-	// Send to the message channel
-	w.msgC <- observation
-}
-
 // publishObservation creates and publishes a message observation
 func (w *Watcher) publishObservation(ctx context.Context, params LogParameters, payload []byte, blockInfo BlockInfo, observationID string) error {
 	// Check for context cancellation

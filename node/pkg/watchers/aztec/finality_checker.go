@@ -8,25 +8,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// checkFinality periodically checks for finalized observations
-func (w *Watcher) checkFinality(ctx context.Context) error {
-	w.logger.Info("Starting Aztec finality checker")
-
-	ticker := time.NewTicker(w.config.FinalityCheckInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if err := w.processFinality(ctx); err != nil {
-				w.logger.Error("Error checking finality", zap.Error(err))
-			}
-		}
-	}
-}
-
 // processFinality checks all pending observations for finality
 func (w *Watcher) processFinality(ctx context.Context) error {
 	// Start with logging the pending observations
@@ -38,7 +19,7 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 		return nil
 	}
 
-	w.logger.Debug("Processing pending observations", zap.Int("count", len(pendingObservations)))
+	w.logger.Info("Processing pending observations", zap.Int("count", len(pendingObservations)))
 
 	// Get the latest finalized block
 	finalizedBlock, err := w.l1Verifier.GetFinalizedBlock(ctx)
@@ -50,7 +31,7 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 		return nil
 	}
 
-	w.logger.Debug("Checking against finalized block", zap.Int("finalized_block", finalizedBlock.Number))
+	w.logger.Info("Checking against finalized block", zap.Int("finalized_block", finalizedBlock.Number))
 
 	// Process each pending observation
 	var toPublish []string
@@ -59,10 +40,10 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 		// Increment attempt count
 		observation.AttemptCount++
 
-		// First, verify this block is still in the canonical chain
-		isCanonical := w.isBlockInCanonicalChain(ctx, observation.AztecBlockNum)
-		if !isCanonical {
-			w.logger.Warn("Observation is for a block no longer in the canonical chain",
+		// First, verify this block is still in the chain
+		isValid := w.isBlockInChain(ctx, observation.AztecBlockNum)
+		if !isValid {
+			w.logger.Warn("Observation is for a block no longer in the chain",
 				zap.String("id", id),
 				zap.Int("aztec_block", observation.AztecBlockNum))
 
@@ -138,31 +119,29 @@ func (w *Watcher) GetProcessedBlockByNumber(blockNumber int) *ProcessedBlock {
 	return nil
 }
 
-// isBlockInCanonicalChain verifies if a block is still part of the canonical chain
-func (w *Watcher) isBlockInCanonicalChain(ctx context.Context, blockNumber int) bool {
+// isBlockInChain verifies if a block is still part of the chain
+func (w *Watcher) isBlockInChain(ctx context.Context, blockNumber int) bool {
 	// First check our local cache of processed blocks
 	cachedBlock := w.GetProcessedBlockByNumber(blockNumber)
 	if cachedBlock != nil {
-		return cachedBlock.IsCanonical
+		return true
 	}
 
 	// If not in our cache, query the blockchain
-	blockInfo, err := w.blockFetcher.FetchBlockInfo(ctx, blockNumber)
+	blockInfo, err := w.blockFetcher.FetchBlock(ctx, blockNumber)
 	if err != nil {
-		w.logger.Warn("Failed to fetch block info for canonical check",
+		w.logger.Warn("Failed to fetch block info for chain check",
 			zap.Int("blockNumber", blockNumber),
 			zap.Error(err))
 		return false
 	}
 
 	// Check if this block's hash matches what's currently at this height
-	// We can't fully verify without the entire chain, but this is a start
 	storedBlock := w.GetProcessedBlockByNumber(blockNumber)
 	if storedBlock != nil {
 		return blockInfo.BlockHash == storedBlock.Hash
 	}
 
-	// If we don't have it stored, assume it's canonical
-	// This is a simplification, but a reasonable one
+	// If we don't have it stored, assume it's valid
 	return true
 }
