@@ -169,34 +169,87 @@ func (w *Watcher) pruneProcessedBlocks(ctx context.Context) {
 		return
 	}
 
-	// Find the index of the finalized block in our processed blocks
+	w.logger.Debug("Attempting to prune blocks",
+		zap.Int("finalizedBlockNumber", finalizedBlock.Number),
+		zap.String("finalizedBlockHash", finalizedBlock.Hash))
+
+	// Log information about our current block storage
+	w.logger.Debug("Current block storage state",
+		zap.Int("processedBlocksCount", len(w.processedBlocks)),
+		zap.Int("blocksByHashCount", len(w.blocksByHash)))
+
+	// Refetch the block to get its actual hash
+	refetchedBlock, err := w.blockFetcher.FetchBlock(ctx, finalizedBlock.Number)
+	if err != nil {
+		w.logger.Warn("Failed to refetch finalized block, keeping all blocks",
+			zap.Error(err))
+		return
+	}
+
+	w.logger.Debug("Refetched finalized block",
+		zap.Int("blockNumber", finalizedBlock.Number),
+		zap.String("refetchedHash", refetchedBlock.BlockHash),
+		zap.String("reportedHash", finalizedBlock.Hash),
+		zap.Bool("hashesMatch", refetchedBlock.BlockHash == finalizedBlock.Hash))
+
+	// Use the refetched hash instead of the reported hash
+	finalizedProcessedBlock, exists := w.blocksByHash[refetchedBlock.BlockHash]
+
+	if !exists {
+		w.logger.Debug("Refetched finalized block hash not found in our processed blocks",
+			zap.String("refetchedHash", refetchedBlock.BlockHash))
+
+		// Log all hashes we have in our map
+		w.logger.Debug("All hashes in our blocksByHash map:")
+		for hash, block := range w.blocksByHash {
+			w.logger.Debug("Hash in map",
+				zap.String("storedHash", hash),
+				zap.Int("blockNumber", block.Number))
+		}
+
+		// Log all blocks in our processedBlocks slice
+		w.logger.Debug("All blocks in our processedBlocks slice:")
+		for i, block := range w.processedBlocks {
+			w.logger.Debug("Block in slice",
+				zap.Int("index", i),
+				zap.Int("blockNumber", block.Number),
+				zap.String("blockHash", block.Hash))
+		}
+		return
+	}
+
+	w.logger.Debug("Found finalized block in our history",
+		zap.Int("blockNumber", finalizedProcessedBlock.Number),
+		zap.String("blockHash", finalizedProcessedBlock.Hash))
+
+	// Find the index of this block in our array
 	finalizedBlockIdx := -1
 	for i, block := range w.processedBlocks {
-		if block.Number == finalizedBlock.Number {
+		if block.Hash == refetchedBlock.BlockHash {
 			finalizedBlockIdx = i
 			break
 		}
 	}
 
-	// If we can't find the finalized block, keep everything
-	if finalizedBlockIdx == -1 {
-		w.logger.Debug("Finalized block not found in processed blocks, keeping all blocks")
-		return
-	}
-
 	// Keep the finalized block and all blocks after it
 	if finalizedBlockIdx > 0 {
+		prunedBlocks := w.processedBlocks[:finalizedBlockIdx]
+
 		// Remove entries from the hash map for blocks being pruned
-		for i := 0; i < finalizedBlockIdx; i++ {
-			delete(w.blocksByHash, w.processedBlocks[i].Hash)
+		for _, block := range prunedBlocks {
+			delete(w.blocksByHash, block.Hash)
 		}
 
 		// Update the slice
 		w.processedBlocks = w.processedBlocks[finalizedBlockIdx:]
 
-		w.logger.Debug("Pruned processed blocks",
+		w.logger.Info("Pruned processed blocks",
 			zap.Int("prunedCount", finalizedBlockIdx),
 			zap.Int("remainingCount", len(w.processedBlocks)),
-			zap.Int("finalizedBlock", finalizedBlock.Number))
+			zap.Int("oldestRemainingBlock", w.processedBlocks[0].Number),
+			zap.String("oldestRemainingHash", w.processedBlocks[0].Hash))
+	} else {
+		w.logger.Debug("No blocks to prune, finalized block is the oldest or only block",
+			zap.Int("finalizedBlockIdx", finalizedBlockIdx))
 	}
 }

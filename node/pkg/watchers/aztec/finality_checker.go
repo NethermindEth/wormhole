@@ -16,10 +16,11 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 	// Get all pending observations
 	pendingObservations := w.observationManager.GetPendingObservations()
 	if len(pendingObservations) == 0 {
+		w.logger.Debug("No pending observations")
 		return nil
 	}
 
-	w.logger.Info("Processing pending observations", zap.Int("count", len(pendingObservations)))
+	w.logger.Debug("Processing pending observations", zap.Int("count", len(pendingObservations)))
 
 	// Get the latest finalized block
 	finalizedBlock, err := w.l1Verifier.GetFinalizedBlock(ctx)
@@ -31,7 +32,7 @@ func (w *Watcher) processFinality(ctx context.Context) error {
 		return nil
 	}
 
-	w.logger.Info("Checking against finalized block", zap.Int("finalized_block", finalizedBlock.Number))
+	w.logger.Debug("Checking against finalized block", zap.Int("finalized_block", finalizedBlock.Number))
 
 	// Process each pending observation
 	var toPublish []string

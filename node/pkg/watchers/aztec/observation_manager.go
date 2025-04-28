@@ -159,7 +159,7 @@ func (m *observationManager) GetPendingObservations() map[string]*PendingObserva
 	defer m.mutex.RUnlock()
 
 	count := len(m.pendingObservations)
-	m.logger.Info("Getting pending observations", zap.Int("count", count))
+	m.logger.Debug("Getting pending observations", zap.Int("count", count))
 
 	// Create a copy to avoid concurrency issues
 	result := make(map[string]*PendingObservation, count)
@@ -217,16 +217,16 @@ func (m *observationManager) LogPendingObservations() {
 	mapSize := len(m.pendingObservations)
 
 	if mapSize == 0 {
-		m.logger.Info("No pending observations")
+		m.logger.Debug("No pending observations")
 		return
 	}
 
-	// Just log the count at info level, not all the details
-	m.logger.Info("Pending observations", zap.Int("total_count", mapSize))
+	// Just log the count at debug level, not all the details
+	m.logger.Debug("Pending observations", zap.Int("total_count", mapSize))
 
-	// Log details at info level for debugging
+	// Log details at debug level as well
 	for id, obs := range m.pendingObservations {
-		m.logger.Info("Pending observation details",
+		m.logger.Debug("Pending observation details",
 			zap.String("id", id),
 			zap.Int("aztec_block", obs.AztecBlockNum),
 			zap.Uint64("sequence", obs.Params.Sequence),

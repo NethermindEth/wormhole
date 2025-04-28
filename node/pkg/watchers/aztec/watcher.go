@@ -94,10 +94,6 @@ func (w *Watcher) Run(ctx context.Context) error {
 }
 
 func (w *Watcher) unifiedProcessor(ctx context.Context) error {
-	// Track last execution times
-	lastFinalityCheck := time.Now()
-	lastBlockPrune := time.Now()
-
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -113,22 +109,11 @@ func (w *Watcher) unifiedProcessor(ctx context.Context) error {
 				w.logger.Error("Error processing blocks", zap.Error(err))
 			}
 
-			// Check finality
-			if time.Since(lastFinalityCheck) >= w.config.FinalityCheckInterval {
-				w.logger.Info("Finality check interval reached",
-					zap.Duration("interval", w.config.FinalityCheckInterval))
-
-				if err := w.processFinality(ctx); err != nil {
-					w.logger.Error("Error checking finality", zap.Error(err))
-				}
-				lastFinalityCheck = time.Now()
+			if err := w.processFinality(ctx); err != nil {
+				w.logger.Error("Error checking finality", zap.Error(err))
 			}
 
-			// Prune blocks if needed
-			if time.Since(lastBlockPrune) >= w.config.BlockPruneInterval {
-				w.pruneProcessedBlocks(ctx)
-				lastBlockPrune = time.Now()
-			}
+			w.pruneProcessedBlocks(ctx)
 		}
 	}
 }
