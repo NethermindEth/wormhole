@@ -178,7 +178,9 @@ func (w *Watcher) pruneProcessedBlocks(ctx context.Context) {
 		zap.Int("processedBlocksCount", len(w.processedBlocks)),
 		zap.Int("blocksByHashCount", len(w.blocksByHash)))
 
-	// Refetch the block to get its actual hash
+	// Refetch the block to get its archive hash, since node_getL2Tips does not return archives.
+	// Archive is what we have as a reference and what we store as blockHash,
+	// since node_getBlock returns only archives and not actual blockHashes
 	refetchedBlock, err := w.blockFetcher.FetchBlock(ctx, finalizedBlock.Number)
 	if err != nil {
 		w.logger.Warn("Failed to refetch finalized block, keeping all blocks",
