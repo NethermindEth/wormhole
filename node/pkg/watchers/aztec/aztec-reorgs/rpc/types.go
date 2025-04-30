@@ -134,6 +134,22 @@ type L2Tips struct {
 	Finalized Tip `json:"finalized"`
 }
 
+// UnmarshalJSON ensures t.Finalized.Number <= t.Proven.Number <= t.Latest.Number.
+func (t *L2Tips) UnmarshalJSON(data []byte) error {
+	type l2Tips L2Tips
+	var x l2Tips
+	if err := json.Unmarshal(data, &x); err != nil {
+		return err
+	}
+	if x.Finalized.Number > x.Proven.Number {
+		return fmt.Errorf("finalized tip at height %d should come after proven tip at height %d", x.Finalized.Number, x.Proven.Number)
+	} else if x.Proven.Number > x.Latest.Number {
+		return fmt.Errorf("proven tip at height %d should come after latest tip at height %d", x.Proven.Number, x.Latest.Number)
+	}
+	*t = L2Tips(x)
+	return nil
+}
+
 type Base64Fp fp.Element
 
 func (b Base64Fp) MarshalJSON() ([]byte, error) {
