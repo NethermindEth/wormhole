@@ -46,7 +46,7 @@ type Client interface {
 }
 
 // New creates a new collector. It will process all blocks after finalized.
-func New(c Client, finalized aztec.Block, contractAddress vaa.Address) *Collector {
+func New(c Client, finalized aztec.Block, contractAddress fp.Element, chainID vaa.ChainID) *Collector {
 	return &Collector{
 		local: View{
 			Finalized: finalized,
@@ -54,6 +54,7 @@ func New(c Client, finalized aztec.Block, contractAddress vaa.Address) *Collecto
 		},
 		c:               c,
 		contractAddress: contractAddress,
+		chainID:         chainID,
 	}
 }
 
@@ -61,7 +62,7 @@ type ReorgError struct {
 	height uint64
 }
 
-func (r ReorgError) Error() string { // TODO can this not be a pointer method?
+func (r ReorgError) Error() string {
 	return fmt.Sprintf("reorg detected at height %d", r.height)
 }
 
@@ -69,11 +70,11 @@ type FinalizedReorgError struct {
 	e ReorgError
 }
 
-func (r FinalizedReorgError) Error() string { // TODO can this not be a pointer method?
+func (r FinalizedReorgError) Error() string {
 	return fmt.Sprintf("reorg detected at finalized height %d", r.e.height)
 }
 
-func (r FinalizedReorgError) Unwrap() error { // TODO can this not be a pointer method?
+func (r FinalizedReorgError) Unwrap() error {
 	return &r.e
 }
 

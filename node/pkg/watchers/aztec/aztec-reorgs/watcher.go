@@ -12,24 +12,30 @@ import (
 	"github.com/certusone/wormhole/node/pkg/watchers/aztec/aztec-reorgs/aztec/client"
 	"github.com/certusone/wormhole/node/pkg/watchers/aztec/aztec-reorgs/collector"
 	aztecrpcclient "github.com/certusone/wormhole/node/pkg/watchers/aztec/aztec-reorgs/rpc/client"
+	"github.com/consensys/gnark-crypto/ecc/grumpkin/fp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
+	"go.uber.org/zap"
 )
 
 type Watcher struct {
-	rpcURL    string
-	finalized aztec.Block
-	blockTime time.Duration
-	msgChan   chan *common.MessagePublication
+	rpcURL          string
+	finalized       aztec.Block
+	blockTime       time.Duration
+	chainID         vaa.ChainID
+	contractAddress fp.Element
+	msgChan         chan *common.MessagePublication
+	log             *zap.Logger
 	readiness.Component
 }
 
 func NewWatcher(
-	chainID vaa.ChainID, // May be hard coded instead of passed in.
+	chainID vaa.ChainID,
 	rpcURL string,
 	finalized aztec.Block,
 	blockTime time.Duration,
 	msgChan chan *common.MessagePublication,
+	log *zap.Logger,
 ) *Watcher {
 	return &Watcher{
 		rpcURL:    rpcURL,
@@ -37,6 +43,7 @@ func NewWatcher(
 		msgChan:   msgChan,
 		blockTime: blockTime,
 		Component: common.MustConvertChainIdToReadinessSyncing(chainID),
+		log:       log,
 	}
 }
 
@@ -45,7 +52,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("dial context: %v", err)
 	}
-	c := collector.New(client.New(aztecrpcclient.New(rpcClient)), w.finalized)
+	c := collector.New(client.New(aztecrpcclient.New(rpcClient)), w.finalized, w.contractAddress, w.chainID)
 
 	ticker := time.NewTicker(w.blockTime)
 	defer ticker.Stop()
@@ -54,15 +61,18 @@ func (w *Watcher) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			_, err := c.Update(ctx)
+			msgs, err := c.Update(ctx)
 			if err != nil {
 				var e collector.FinalizedReorgError
 				if errors.Is(err, &e) {
 					return fmt.Errorf("collector: %v", &e)
 				}
-				continue // TODO: log
+				w.log.Warn("Failed to collect messages, retrying...", zap.Error(err))
+				continue
 			}
-			// TODO handle update
+			for _, msg := range msgs {
+				w.msgChan <- &msg
+			}
 		}
 	}
 }

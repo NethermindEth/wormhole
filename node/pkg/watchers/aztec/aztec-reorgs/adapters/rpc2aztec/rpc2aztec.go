@@ -101,7 +101,7 @@ func PublicDataWrite(w rpc.PublicDataWrite) aztec.PublicDataWrite {
 
 func PrivateLogData(d rpc.PrivateLogData) aztec.PrivateLogData {
 	return aztec.PrivateLogData{
-		Log:             aztec.PrivateLog(utils.Map(d.Log, hexFpToFp)),
+		Log:             utils.Map(d.Log, hexFpToFp),
 		NoteHashCounter: uint32(d.NoteHashCounter),
 		Counter:         uint32(d.Counter),
 	}
@@ -114,8 +114,8 @@ func ContractClassLog(l rpc.ContractClassLogData) aztec.ContractClassLog {
 	}
 }
 
-func PublicLog(l rpc.PublicLog) aztec.PublicLog {
-	return utils.Map(l, hexFpToFp)
+func PublicLog(l rpc.PublicLog) []fp.Element {
+	return utils.Map([]rpc.HexFp(l), hexFpToFp)
 }
 
 func TxEffect(e rpc.TxEffect) aztec.TxEffect {
