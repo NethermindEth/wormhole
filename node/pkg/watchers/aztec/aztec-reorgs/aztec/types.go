@@ -19,7 +19,7 @@ type TxEffect struct {
 	L2ToL1MsgHashes   []fp.Element
 	PublicDataWrites  []PublicDataWrite
 	PrivateLogs       []PrivateLogData
-	PublicLogs        []PublicLog
+	PublicLogs        [][]fp.Element
 	ContractClassLogs []ContractClassLog
 }
 
@@ -128,15 +128,11 @@ type PublicDataWrite struct {
 	Value    fp.Element
 }
 
-type PrivateLog []fp.Element
-
 type PrivateLogData struct {
-	Log             PrivateLog
+	Log             []fp.Element
 	NoteHashCounter uint32
 	Counter         uint32
 }
-
-type PublicLog []fp.Element
 
 type ContractClassLog struct {
 	ContractAddress fp.Element

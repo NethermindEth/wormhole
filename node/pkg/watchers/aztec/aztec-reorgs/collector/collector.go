@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
+	"github.com/certusone/wormhole/node/pkg/common"
 	"github.com/certusone/wormhole/node/pkg/watchers/aztec/aztec-reorgs/aztec"
 	"github.com/consensys/gnark-crypto/ecc/grumpkin/fp"
+	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 )
 
 type View struct {
@@ -33,8 +34,10 @@ func (remote View) IsAhead(local View) bool {
 }
 
 type Collector struct {
-	local View
-	c     Client
+	local           View
+	c               Client
+	contractAddress fp.Element
+	chainID         vaa.ChainID
 }
 
 type Client interface {
@@ -43,25 +46,15 @@ type Client interface {
 }
 
 // New creates a new collector. It will process all blocks after finalized.
-func New(c Client, finalized aztec.Block) *Collector {
+func New(c Client, finalized aztec.Block, contractAddress vaa.Address) *Collector {
 	return &Collector{
 		local: View{
 			Finalized: finalized,
 			Blocks:    make([]aztec.Block, 0),
 		},
-		c: c,
+		c:               c,
+		contractAddress: contractAddress,
 	}
-}
-
-type Message struct {
-	TxHash    fp.Element
-	BlockTime time.Time
-	Log       aztec.PublicLog
-}
-
-type Update struct {
-	Finalized   []Message
-	Unfinalized []Message
 }
 
 type ReorgError struct {
@@ -84,7 +77,7 @@ func (r FinalizedReorgError) Unwrap() error { // TODO can this not be a pointer 
 	return &r.e
 }
 
-// assumes end.Number >= start.Number
+// blocks assumes end.Number >= start.Number.
 func (w *Collector) blocks(ctx context.Context, start, end aztec.Tip) ([]aztec.Block, error) {
 	limit := end.Number - start.Number + 1
 	blocks, err := w.c.Blocks(ctx, start.Number, limit, false)
@@ -127,8 +120,8 @@ func (c *Collector) remoteView(ctx context.Context) (*View, error) {
 	}, nil
 }
 
-func (w *Collector) Update(ctx context.Context) (*Update, error) {
-	remote, err := w.remoteView(ctx)
+func (c *Collector) Update(ctx context.Context) ([]common.MessagePublication, error) {
+	remote, err := c.remoteView(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -140,18 +133,18 @@ func (w *Collector) Update(ctx context.Context) (*Update, error) {
 	//   2. ahead of the local view: the remote height is greater than the local latest height.
 	//   3. within the local view: neither ahead nor behind.
 
-	var unfinalized []Message
-	if remote.IsBehind(w.local) {
+	var msgs []common.MessagePublication
+	if remote.IsBehind(c.local) {
 		return nil, FinalizedReorgError{
 			e: ReorgError{
-				height: w.local.Finalized.Header.GlobalVariables.BlockNumber,
+				height: c.local.Finalized.Header.GlobalVariables.BlockNumber,
 			},
 		}
-	} else if remote.IsAhead(w.local) {
+	} else if remote.IsAhead(c.local) {
 		// Process all blocks in the range (local finalized head, remote finalized head].
 		// We only process them as unfinalized blocks in order to "catch up", reducing the problem to case 3 above.
-		latestLocalHeader := w.local.LatestBlock().Header
-		blocks, err := w.blocks(ctx, latestLocalHeader.ToTip(), remote.Finalized.Header.ToTip())
+		latestLocalHeader := c.local.LatestBlock().Header
+		blocks, err := c.blocks(ctx, latestLocalHeader.ToTip(), remote.Finalized.Header.ToTip())
 		if err != nil {
 			var e ReorgError
 			if errors.Is(err, &e) {
@@ -161,22 +154,22 @@ func (w *Collector) Update(ctx context.Context) (*Update, error) {
 			}
 			return nil, err
 		}
-		unfinalized = append(unfinalized, w.processUnfinalizedBlocks(blocks[1:])...)
+		msgs = append(msgs, c.processUnfinalizedBlocks(blocks[1:])...)
 	}
 
 	// Process newly finalized blocks to bring w.local.Finalized up to remote.Finalized.
 
-	remoteFinalizedBlockIndex := remote.Finalized.Header.GlobalVariables.BlockNumber - w.local.Finalized.Header.GlobalVariables.BlockNumber
-	if !remote.Finalized.Equal(w.local.Blocks[remoteFinalizedBlockIndex]) {
+	remoteFinalizedBlockIndex := remote.Finalized.Header.GlobalVariables.BlockNumber - c.local.Finalized.Header.GlobalVariables.BlockNumber
+	if !remote.Finalized.Equal(c.local.Blocks[remoteFinalizedBlockIndex]) {
 		return nil, FinalizedReorgError{
 			e: ReorgError{
-				height: w.local.Finalized.Header.GlobalVariables.BlockNumber,
+				height: c.local.Finalized.Header.GlobalVariables.BlockNumber,
 			},
 		}
 	}
-	finalized := processBlocks(consistencyLevelFinalized, w.local.Blocks[:remoteFinalizedBlockIndex+1])
-	w.local.Blocks = w.local.Blocks[remoteFinalizedBlockIndex+1:]
-	w.local.Finalized = remote.Finalized
+	msgs = append(msgs, c.processBlocks(consistencyLevelFinalized, c.local.Blocks[:remoteFinalizedBlockIndex+1])...)
+	c.local.Blocks = c.local.Blocks[remoteFinalizedBlockIndex+1:]
+	c.local.Finalized = remote.Finalized
 
 	// Now that the finalized heads match, process remote.Blocks.
 
@@ -185,45 +178,58 @@ func (w *Collector) Update(ctx context.Context) (*Update, error) {
 	// This is equivalent to finding the latest block in remote.Blocks that is not in w.local.Blocks.
 	unprocessedIndex := 0
 	for i, block := range remote.Blocks {
-		if i == len(w.local.Blocks) {
+		if i == len(c.local.Blocks) {
 			break
-		} else if !block.Equal(w.local.Blocks[i]) {
+		} else if !block.Equal(c.local.Blocks[i]) {
 			break
 		}
 		unprocessedIndex++
 	}
 
-	return &Update{
-		Unfinalized: append(unfinalized, w.processUnfinalizedBlocks(remote.Blocks[unprocessedIndex:])...),
-		Finalized:   finalized,
-	}, nil
+	return append(msgs, c.processUnfinalizedBlocks(remote.Blocks[unprocessedIndex:])...), nil
 }
 
-func (c *Collector) processUnfinalizedBlocks(blocks []aztec.Block) []Message {
+func (c *Collector) processUnfinalizedBlocks(blocks []aztec.Block) []common.MessagePublication {
 	c.local.Blocks = append(c.local.Blocks, blocks...)
-	return processBlocks(consistencyLevelUnfinalized, blocks)
+	return c.processBlocks(consistencyLevelUnfinalized, blocks)
 }
 
 type consistencyLevel byte
 
 const (
-	consistencyLevelUnfinalized = iota
+	consistencyLevelUnfinalized = 200
+	consistencyLevelProven      // Unused right now.
 	consistencyLevelFinalized
 )
 
-func processBlocks(_ consistencyLevel, blocks []aztec.Block) []Message {
-	var msgs []Message
+func (c *Collector) processBlocks(cLevel consistencyLevel, blocks []aztec.Block) []common.MessagePublication {
+	var msgs []common.MessagePublication
 	// Since most logs will not match the one we're interested in, this could be done more efficiently in parallel.
 	// Because there will not be many TxEffects per block on testnet, we keep it sequential for now.
 	for _, block := range blocks {
+		blockTimestamp := block.Header.GlobalVariables.Timestamp
 		for _, txEffect := range block.Body.TxEffects {
+			txID := txEffect.TxHash.Bytes()
 			for _, log := range txEffect.PublicLogs {
-				// TODO parse logs based on consistency level
-				// Will need to change the Message struct
-				msgs = append(msgs, Message{
-					TxHash:    txEffect.TxHash,
-					BlockTime: block.Header.GlobalVariables.Timestamp,
-					Log:       log,
+				logConsistencyLevel := uint8(log[3].Uint64())
+				if consistencyLevel(logConsistencyLevel) != cLevel {
+					continue
+				}
+				var payload []byte
+				for _, payloadFp := range log[4:] {
+					payloadFpBytes := payloadFp.Bytes()
+					payload = append(payload, payloadFpBytes[:]...)
+				}
+				// Parsed based on the format in aztec/contracts/src/main.nr.
+				msgs = append(msgs, common.MessagePublication{
+					TxID:             txID[:],
+					Timestamp:        blockTimestamp,
+					Nonce:            uint32(log[2].Uint64()),
+					Sequence:         log[1].Uint64(),
+					ConsistencyLevel: logConsistencyLevel,
+					EmitterChain:     c.chainID,
+					EmitterAddress:   vaa.Address(c.contractAddress.Bytes()),
+					Payload:          payload,
 				})
 			}
 		}
