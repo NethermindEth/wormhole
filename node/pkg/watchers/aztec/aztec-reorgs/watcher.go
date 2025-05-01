@@ -48,11 +48,12 @@ func NewWatcher(
 }
 
 func (w *Watcher) Run(ctx context.Context) error {
-	rpcClient, err := rpc.DialContext(ctx, w.rpcURL) // TODO we need DialOptions
+	rpcClient, err := rpc.DialContext(ctx, w.rpcURL) // TODO we need DialOptions for retries. Need to upgrade go-ethereum.
 	if err != nil {
 		return fmt.Errorf("dial context: %v", err)
 	}
 	c := collector.New(client.New(aztecrpcclient.New(rpcClient)), w.finalized, w.contractAddress, w.chainID)
+	// TODO cross-check chain id?
 
 	ticker := time.NewTicker(w.blockTime)
 	defer ticker.Stop()
