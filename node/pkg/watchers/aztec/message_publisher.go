@@ -28,15 +28,6 @@ func (w *Watcher) publishObservation(ctx context.Context, params LogParameters, 
 		txID = []byte{0x0}
 	}
 
-	// Check if this message has already been published
-	if w.hasObservationBeenPublished(observationID) {
-		w.logger.Debug("Skipping already published observation",
-			zap.String("id", observationID),
-			zap.Stringer("emitter", params.SenderAddress),
-			zap.Uint64("sequence", params.Sequence))
-		return nil
-	}
-
 	// Check for context cancellation after potentially long operation
 	select {
 	case <-ctx.Done():
@@ -44,9 +35,6 @@ func (w *Watcher) publishObservation(ctx context.Context, params LogParameters, 
 	default:
 		// Continue processing
 	}
-
-	// Check if we're re-observing a message that was previously invalidated
-	isReobservation := w.isReobservation(params.SenderAddress, params.Sequence)
 
 	// Create the observation
 	observation := &common.MessagePublication{
@@ -58,7 +46,7 @@ func (w *Watcher) publishObservation(ctx context.Context, params LogParameters, 
 		EmitterAddress:   params.SenderAddress,
 		Payload:          payload,
 		ConsistencyLevel: params.ConsistencyLevel,
-		IsReobservation:  isReobservation,
+		IsReobservation:  false,
 	}
 
 	// Increment metrics
@@ -71,8 +59,7 @@ func (w *Watcher) publishObservation(ctx context.Context, params LogParameters, 
 		zap.Time("timestamp", observation.Timestamp),
 		zap.Uint64("sequence", observation.Sequence),
 		zap.Stringer("emitter_chain", observation.EmitterChain),
-		zap.Stringer("emitter_address", observation.EmitterAddress),
-		zap.Bool("is_reobservation", isReobservation))
+		zap.Stringer("emitter_address", observation.EmitterAddress))
 
 	// Send to the message channel
 	select {
@@ -81,9 +68,6 @@ func (w *Watcher) publishObservation(ctx context.Context, params LogParameters, 
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-
-	// Record that we've published this observation
-	w.recordPublishedObservation(observationID, params)
 
 	return nil
 }

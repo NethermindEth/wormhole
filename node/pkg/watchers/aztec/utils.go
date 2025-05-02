@@ -9,18 +9,6 @@ import (
 
 // Helper functions for common parsing tasks
 
-// ParseInt parses a string as an integer with proper error handling
-func ParseInt(s string, base int, bitSize int) (int64, error) {
-	v, err := strconv.ParseInt(s, base, bitSize)
-	if err != nil {
-		return 0, &ErrParsingFailed{
-			What: fmt.Sprintf("integer with base %d", base),
-			Err:  err,
-		}
-	}
-	return v, nil
-}
-
 // ParseUint parses a string as an unsigned integer with proper error handling
 func ParseUint(s string, base int, bitSize int) (uint64, error) {
 	v, err := strconv.ParseUint(s, base, bitSize)
@@ -48,17 +36,6 @@ func ParseHexUint64(hexStr string) (uint64, error) {
 	}
 
 	return value, nil
-}
-
-// IsPrintableString checks if a string contains mostly printable ASCII characters
-func IsPrintableString(s string) bool {
-	printable := 0
-	for _, r := range s {
-		if r >= 32 && r <= 126 {
-			printable++
-		}
-	}
-	return printable >= 3 && float64(printable)/float64(len(s)) > 0.5
 }
 
 // GetJSONRPCError extracts error information from a JSON-RPC response

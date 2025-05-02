@@ -17,33 +17,8 @@ type Watcher struct {
 	msgC               chan<- *common.MessagePublication
 	logger             *zap.Logger
 
-	// Chain tracking for reorg detection
-	processedBlocks []*ProcessedBlock
-	blocksByHash    map[string]*ProcessedBlock // Map for O(1) lookups by hash
+	// Simplified tracking - just track the last processed block number
 	lastBlockNumber int
-	reorgDepth      int // Track deepest reorg for metrics
-}
-
-// ProcessedBlock stores information about a processed block
-type ProcessedBlock struct {
-	Number       int
-	Hash         string
-	ParentHash   string
-	Observations []*ObservationRecord
-	Timestamp    uint64
-}
-
-// ObservationRecord represents a message that has been observed and possibly published
-type ObservationRecord struct {
-	ID               string
-	BlockNumber      int
-	LogParameters    LogParameters
-	Payload          []byte
-	BlockInfo        BlockInfo
-	IsPublished      bool
-	PublishedTime    time.Time
-	IsInvalidated    bool // Set to true if this observation was invalidated by a reorg
-	InvalidationTime time.Time
 }
 
 // NewWatcher creates a new Watcher
@@ -62,10 +37,7 @@ func NewWatcher(
 		observationManager: observationManager,
 		msgC:               msgC,
 		logger:             logger,
-		processedBlocks:    make([]*ProcessedBlock, 0),
-		blocksByHash:       make(map[string]*ProcessedBlock), // Initialize hash map
-		lastBlockNumber:    config.StartBlock,                // Will process StartBlock first
-		reorgDepth:         0,
+		lastBlockNumber:    config.StartBlock - 1, // Start by processing the StartBlock
 	}
 }
 
@@ -80,8 +52,8 @@ func (w *Watcher) Run(ctx context.Context) error {
 	defer close(errC)
 
 	// Start a single goroutine that handles all operations
-	common.RunWithScissors(ctx, errC, "aztec_unified_processor", func(ctx context.Context) error {
-		return w.unifiedProcessor(ctx)
+	common.RunWithScissors(ctx, errC, "aztec_processor", func(ctx context.Context) error {
+		return w.processor(ctx)
 	})
 
 	// Wait for context cancellation or error
@@ -93,11 +65,11 @@ func (w *Watcher) Run(ctx context.Context) error {
 	}
 }
 
-func (w *Watcher) unifiedProcessor(ctx context.Context) error {
-	ticker := time.NewTicker(500 * time.Millisecond)
+func (w *Watcher) processor(ctx context.Context) error {
+	ticker := time.NewTicker(w.config.LogProcessingInterval)
 	defer ticker.Stop()
 
-	w.logger.Info("Starting Aztec event processor with reorg handling")
+	w.logger.Info("Starting Aztec event processor using finalized blocks")
 
 	for {
 		select {
@@ -108,12 +80,6 @@ func (w *Watcher) unifiedProcessor(ctx context.Context) error {
 			if err := w.processBlocks(ctx); err != nil {
 				w.logger.Error("Error processing blocks", zap.Error(err))
 			}
-
-			if err := w.processFinality(ctx); err != nil {
-				w.logger.Error("Error checking finality", zap.Error(err))
-			}
-
-			w.pruneProcessedBlocks(ctx)
 		}
 	}
 }

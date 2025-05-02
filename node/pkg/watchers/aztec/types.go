@@ -1,9 +1,6 @@
 package aztec
 
 import (
-	"strconv"
-	"time"
-
 	"github.com/certusone/wormhole/node/pkg/watchers"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 )
@@ -22,16 +19,6 @@ type LogParameters struct {
 	Sequence         uint64
 	Nonce            uint32
 	ConsistencyLevel uint8
-}
-
-// PendingObservation represents an observation waiting for finality
-type PendingObservation struct {
-	Params        LogParameters
-	Payload       []byte
-	BlockInfo     BlockInfo
-	AztecBlockNum int
-	AttemptCount  int
-	SubmitTime    time.Time
 }
 
 // BlockInfo enhanced to include block hash and parent hash
@@ -218,12 +205,4 @@ type ErrParsingFailed struct {
 
 func (e ErrParsingFailed) Error() string {
 	return "failed parsing " + e.What + ": " + e.Err.Error()
-}
-
-type ErrBlockNotIncluded struct {
-	BlockNumber int
-}
-
-func (e ErrBlockNotIncluded) Error() string {
-	return "block not yet included in L1: " + strconv.Itoa(e.BlockNumber)
 }

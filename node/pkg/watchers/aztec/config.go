@@ -3,6 +3,12 @@ package aztec
 import (
 	"time"
 
+	"github.com/certusone/wormhole/node/pkg/common"
+	gossipv1 "github.com/certusone/wormhole/node/pkg/proto/gossip/v1"
+	"github.com/certusone/wormhole/node/pkg/query"
+	"github.com/certusone/wormhole/node/pkg/supervisor"
+	"github.com/certusone/wormhole/node/pkg/watchers"
+	"github.com/certusone/wormhole/node/pkg/watchers/interfaces"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 )
 
@@ -56,4 +62,43 @@ func DefaultConfig(chainID vaa.ChainID, networkID string, rpcURL, contractAddres
 		InitialBackoff:    500 * time.Millisecond,
 		BackoffMultiplier: 1.5,
 	}
+}
+
+// GetChainID implements the watchers.WatcherConfig interface
+func (c *WatcherConfig) GetChainID() vaa.ChainID {
+	return c.ChainID
+}
+
+// GetNetworkID implements the watchers.WatcherConfig interface
+func (c *WatcherConfig) GetNetworkID() watchers.NetworkID {
+	return c.NetworkID
+}
+
+// RequiredL1Finalizer implements the watchers.WatcherConfig interface
+// Return an empty network ID since Aztec handles its own L1/L2 finality checks
+func (c *WatcherConfig) RequiredL1Finalizer() watchers.NetworkID {
+	return ""
+}
+
+// SetL1Finalizer implements the watchers.WatcherConfig interface
+// This is a no-op for Aztec since we use our own internal L1Verifier instead
+func (c *WatcherConfig) SetL1Finalizer(l1finalizer interfaces.L1Finalizer) {
+	// No-op: we use our own internal L1Verifier/L1Finalizer
+}
+
+// Create implements the watchers.WatcherConfig interface with the updated signature
+func (c *WatcherConfig) Create(
+	msgC chan<- *common.MessagePublication,
+	obsvReqC <-chan *gossipv1.ObservationRequest,
+	queryReqC <-chan *query.PerChainQueryInternal,
+	queryRespC chan<- *query.PerChainQueryResponseInternal,
+	gst chan<- *common.GuardianSet,
+	env common.Environment,
+) (interfaces.L1Finalizer, supervisor.Runnable, interfaces.Reobserver, error) {
+	// Create the runnable and L1Finalizer
+	l1Finalizer, runnable := NewWatcherFromConfig(c.ChainID, string(c.NetworkID), c.Rpc, c.Contract, msgC, obsvReqC)
+
+	// Return the L1Verifier as an L1Finalizer along with the runnable
+	// This makes it available to the framework if needed
+	return l1Finalizer, runnable, nil, nil
 }
