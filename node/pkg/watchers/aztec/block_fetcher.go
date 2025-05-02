@@ -37,6 +37,8 @@ func NewAztecBlockFetcher(rpcURL string, logger *zap.Logger) (BlockFetcher, erro
 	}, nil
 }
 
+// Guardians should set ARCHIVER_MAX_LOGS to a high number in the Aztec node
+// since we don't support pagination in the client.
 // FetchPublicLogs gets logs for a specific block range
 func (f *aztecBlockFetcher) FetchPublicLogs(ctx context.Context, fromBlock, toBlock int) ([]ExtendedPublicLog, error) {
 	f.logger.Debug("Fetching logs",
