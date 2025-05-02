@@ -78,7 +78,7 @@ func (w *Watcher) processBlockLogs(ctx context.Context, blockNumber int, blockIn
 			if hash, exists := blockInfo.TxHashesByIndex[txIndex]; exists {
 				txHash = hash
 			} else {
-				w.logger.Warn("Transaction index from log not found in block",
+				w.logger.Error("Transaction index from log not found in block",
 					zap.Int("blockNumber", blockNumber),
 					zap.Int("txIndex", txIndex))
 			}
