@@ -54,7 +54,7 @@ func DefaultConfig(chainID vaa.ChainID, networkID string, rpcURL, contractAddres
 
 		// Timeouts and intervals
 		RPCTimeout:            30 * time.Second,
-		LogProcessingInterval: 1 * time.Second,
+		LogProcessingInterval: 10 * time.Second,
 		RequestTimeout:        10 * time.Second,
 
 		// Retry configuration
