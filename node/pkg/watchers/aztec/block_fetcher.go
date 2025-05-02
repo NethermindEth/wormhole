@@ -2,12 +2,12 @@ package aztec
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/rpc"
 	"go.uber.org/zap"
 )
 
@@ -19,88 +19,72 @@ type BlockFetcher interface {
 
 // aztecBlockFetcher is the implementation of BlockFetcher
 type aztecBlockFetcher struct {
-	rpcURL string
-	client HTTPClient
-	logger *zap.Logger
+	rpcClient *rpc.Client
+	logger    *zap.Logger
 }
 
 // NewAztecBlockFetcher creates a new block fetcher
-func NewAztecBlockFetcher(rpcURL string, client HTTPClient, logger *zap.Logger) BlockFetcher {
-	return &aztecBlockFetcher{
-		rpcURL: rpcURL,
-		client: client,
-		logger: logger,
+func NewAztecBlockFetcher(rpcURL string, logger *zap.Logger) (BlockFetcher, error) {
+	// Create a new RPC client
+	client, err := rpc.DialContext(context.Background(), rpcURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RPC client: %v", err)
 	}
+
+	return &aztecBlockFetcher{
+		rpcClient: client,
+		logger:    logger,
+	}, nil
 }
 
 // FetchPublicLogs gets logs for a specific block range
 func (f *aztecBlockFetcher) FetchPublicLogs(ctx context.Context, fromBlock, toBlock int) ([]ExtendedPublicLog, error) {
-	logFilter := map[string]any{
-		"fromBlock": fromBlock,
-		"toBlock":   toBlock,
-	}
-
-	payload := map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "node_getPublicLogs",
-		"params":  []any{logFilter},
-		"id":      1,
-	}
-
 	f.logger.Debug("Fetching logs",
 		zap.Int("fromBlock", fromBlock),
 		zap.Int("toBlock", toBlock))
 
-	responseBody, err := f.client.DoRequest(ctx, f.rpcURL, payload)
+	// Prepare the filter arguments
+	logFilter := map[string]interface{}{
+		"fromBlock": fromBlock,
+		"toBlock":   toBlock,
+	}
+
+	// Create a variable to hold the result
+	var result struct {
+		Logs       []ExtendedPublicLog `json:"logs"`
+		MaxLogsHit bool                `json:"maxLogsHit"`
+	}
+
+	// Make the RPC call
+	err := f.rpcClient.CallContext(ctx, &result, "node_getPublicLogs", logFilter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch public logs: %v", err)
 	}
 
-	// Parse the response
-	var response JsonRpcResponse
-	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return nil, &ErrParsingFailed{
-			What: "logs response",
-			Err:  err,
-		}
-	}
-
-	return response.Result.Logs, nil
+	return result.Logs, nil
 }
 
 // FetchBlock gets info for a specific block
 func (f *aztecBlockFetcher) FetchBlock(ctx context.Context, blockNumber int) (BlockInfo, error) {
-	payload := map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "node_getBlock",
-		"params":  []any{blockNumber},
-		"id":      1,
-	}
+	// Create variables to hold the result
+	var blockResult BlockResult
 
-	responseBody, err := f.client.DoRequest(ctx, f.rpcURL, payload)
+	// Make the RPC call
+	err := f.rpcClient.CallContext(ctx, &blockResult, "node_getBlock", blockNumber)
 	if err != nil {
 		return BlockInfo{}, fmt.Errorf("failed to fetch block info: %v", err)
-	}
-
-	// Parse the response
-	var response BlockResponse
-	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return BlockInfo{}, &ErrParsingFailed{
-			What: "block response",
-			Err:  err,
-		}
 	}
 
 	info := BlockInfo{}
 
 	// Set the block hash using the archive root
-	info.BlockHash = response.Result.Archive.Root
+	info.BlockHash = blockResult.Archive.Root
 
 	// Set the parent hash using lastArchive.root
-	info.ParentHash = response.Result.Header.LastArchive.Root
+	info.ParentHash = blockResult.Header.LastArchive.Root
 
 	// Get the timestamp from global variables (remove 0x prefix and convert from hex)
-	timestampHex := strings.TrimPrefix(response.Result.Header.GlobalVariables.Timestamp, "0x")
+	timestampHex := strings.TrimPrefix(blockResult.Header.GlobalVariables.Timestamp, "0x")
 	if timestampHex == "" {
 		// Handle empty timestamp (typically for genesis block)
 		if blockNumber == 0 {
@@ -117,28 +101,26 @@ func (f *aztecBlockFetcher) FetchBlock(ctx context.Context, blockNumber int) (Bl
 		// Parse the timestamp normally
 		timestamp, err := strconv.ParseUint(timestampHex, 16, 64)
 		if err != nil {
-			return BlockInfo{}, &ErrParsingFailed{
-				What: "timestamp",
-				Err:  err,
-			}
+			return BlockInfo{}, fmt.Errorf("failed parsing timestamp: %v", err)
 		}
 		info.Timestamp = timestamp
 	}
 
-	// svlachakis check if remove - this is used in wormhole we can't remove it.
-	// Get the transaction hash from the first transaction in the block (if available)
-	if len(response.Result.Body.TxEffects) > 0 {
-		info.TxHash = response.Result.Body.TxEffects[0].TxHash
-	} else {
-		// If no transactions, use a placeholder
-		info.TxHash = "0x0"
+	// Default transaction hash
+	info.TxHash = "0x0"
+
+	// Store transaction hashes by index for log processing
+	info.TxHashesByIndex = make(map[int]string)
+	for i, txEffect := range blockResult.Body.TxEffects {
+		info.TxHashesByIndex[i] = txEffect.TxHash
 	}
 
 	// Log the block hash and parent hash for debugging
 	f.logger.Debug("Fetched block info",
 		zap.Int("blockNumber", blockNumber),
 		zap.String("blockHash", info.BlockHash),
-		zap.String("parentHash", info.ParentHash))
+		zap.String("parentHash", info.ParentHash),
+		zap.Int("txCount", len(blockResult.Body.TxEffects)))
 
 	return info, nil
 }

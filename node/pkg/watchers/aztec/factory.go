@@ -2,7 +2,7 @@ package aztec
 
 import (
 	"context"
-	"time"
+	"fmt"
 
 	"github.com/certusone/wormhole/node/pkg/common"
 	gossipv1 "github.com/certusone/wormhole/node/pkg/proto/gossip/v1"
@@ -29,21 +29,15 @@ func NewWatcherFromConfig(
 	msgC chan<- *common.MessagePublication,
 	obsvReqC <-chan *gossipv1.ObservationRequest,
 ) (interfaces.L1Finalizer, supervisor.Runnable) {
-	// Create a shared HTTPClient
-	httpClient := NewHTTPClient(
-		10*time.Second,         // Default timeout
-		3,                      // Default max retries
-		500*time.Millisecond,   // Default initial backoff
-		1.5,                    // Default backoff multiplier
-		zap.L().Named("aztec"), // Default logger until context provides one
-	)
+	// Create a logger
+	logger := zap.L().Named("aztec")
 
 	// Create a shared L1Verifier instance
-	l1Verifier := NewAztecFinalityVerifier(
-		rpcURL, // We use the Aztec RPC URL
-		httpClient,
-		zap.L().Named("aztec.finality"),
-	)
+	l1Verifier, err := NewAztecFinalityVerifier(rpcURL, logger.Named("finality"))
+	if err != nil {
+		// Log error but continue - we'll retry in the runnable
+		logger.Error("Failed to create L1Verifier at startup, will retry in runnable", zap.Error(err))
+	}
 
 	// Create a runnable that uses the L1Verifier
 	runnable := supervisor.Runnable(func(ctx context.Context) error {
@@ -58,27 +52,28 @@ func NewWatcherFromConfig(
 		// Create default config
 		config := DefaultConfig(chainID, networkID, rpcURL, contractAddress)
 
-		// Create a new HTTPClient with context-provided logger
-		httpClient := NewHTTPClient(
-			config.RequestTimeout,
-			config.MaxRetries,
-			config.InitialBackoff,
-			config.BackoffMultiplier,
-			logger,
-		)
+		// Create the block fetcher
+		blockFetcher, err := NewAztecBlockFetcher(rpcURL, logger)
+		if err != nil {
+			return fmt.Errorf("failed to create block fetcher: %v", err)
+		}
 
-		// Create the components with context-provided logger
-		blockFetcher := NewAztecBlockFetcher(rpcURL, httpClient, logger)
-
-		// Use the existing L1Verifier but update its logger
-		// We can't create a new one because we need to return the original instance
-		if l1v, ok := l1Verifier.(*aztecFinalityVerifier); ok {
+		// If L1Verifier creation failed earlier, create it now
+		if l1Verifier == nil {
+			var initErr error
+			l1Verifier, initErr = NewAztecFinalityVerifier(rpcURL, logger.Named("aztec_finality"))
+			if initErr != nil {
+				return fmt.Errorf("failed to create L1Verifier: %v", initErr)
+			}
+		} else if l1v, ok := l1Verifier.(*aztecFinalityVerifier); ok {
+			// Update the logger in the existing L1Verifier
 			l1v.logger = logger.Named("aztec_finality")
 		}
 
+		// Create the observation manager
 		observationManager := NewObservationManager(networkID, logger)
 
-		// Create the watcher with simplified structure
+		// Create the watcher
 		watcher := NewWatcher(
 			config,
 			blockFetcher,

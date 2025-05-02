@@ -70,9 +70,29 @@ func (w *Watcher) processBlockLogs(ctx context.Context, blockNumber int, blockIn
 
 	// Process each log
 	for _, log := range logs {
-		if err := w.processLog(ctx, log, blockInfo); err != nil {
+		// Get the correct transaction hash for this log
+		txHash := "0x0" // Default if we can't find the right transaction
+
+		// Use the TxIndex from the log's ID to get the right transaction hash
+		if txIndex := log.ID.TxIndex; txIndex >= 0 {
+			if hash, exists := blockInfo.TxHashesByIndex[txIndex]; exists {
+				txHash = hash
+			} else {
+				w.logger.Warn("Transaction index from log not found in block",
+					zap.Int("blockNumber", blockNumber),
+					zap.Int("txIndex", txIndex))
+			}
+		}
+
+		// Create a copy of blockInfo with the correct transaction hash for this log
+		logBlockInfo := blockInfo
+		logBlockInfo.TxHash = txHash
+
+		if err := w.processLog(ctx, log, logBlockInfo); err != nil {
 			w.logger.Error("Failed to process log",
 				zap.Int("block", log.ID.BlockNumber),
+				zap.Int("txIndex", log.ID.TxIndex),
+				zap.Int("logIndex", log.ID.LogIndex),
 				zap.Error(err))
 			// Continue with other logs
 			continue

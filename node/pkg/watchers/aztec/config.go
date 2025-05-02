@@ -49,7 +49,7 @@ func DefaultConfig(chainID vaa.ChainID, networkID string, rpcURL, contractAddres
 		ContractAddress: contractAddress,
 
 		// Processing parameters
-		StartBlock:        0,
+		StartBlock:        1,
 		PayloadInitialCap: 13,
 
 		// Timeouts and intervals

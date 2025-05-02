@@ -2,12 +2,12 @@ package aztec
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/certusone/wormhole/node/pkg/watchers/interfaces"
+	"github.com/ethereum/go-ethereum/rpc"
 	"go.uber.org/zap"
 )
 
@@ -25,9 +25,8 @@ type L1Verifier interface {
 
 // aztecFinalityVerifier is a simplified L1Verifier that queries Aztec directly
 type aztecFinalityVerifier struct {
-	rpcURL string
-	client HTTPClient
-	logger *zap.Logger
+	rpcClient *rpc.Client
+	logger    *zap.Logger
 
 	// Cache for finalized blocks
 	finalizedBlockCache     *FinalizedBlock
@@ -39,15 +38,19 @@ type aztecFinalityVerifier struct {
 // NewAztecFinalityVerifier creates a new L1 verifier
 func NewAztecFinalityVerifier(
 	rpcURL string,
-	client HTTPClient,
 	logger *zap.Logger,
-) L1Verifier {
+) (L1Verifier, error) {
+	// Create a new RPC client
+	client, err := rpc.DialContext(context.Background(), rpcURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RPC client: %v", err)
+	}
+
 	return &aztecFinalityVerifier{
-		rpcURL:                 rpcURL,
-		client:                 client,
+		rpcClient:              client,
 		logger:                 logger,
 		finalizedBlockCacheTTL: 30 * time.Second,
-	}
+	}, nil
 }
 
 // GetLatestFinalizedBlockNumber implements the interfaces.L1Finalizer interface
@@ -89,31 +92,18 @@ func (v *aztecFinalityVerifier) GetFinalizedBlock(ctx context.Context) (*Finaliz
 	v.finalizedBlockCacheMu.RUnlock()
 
 	// Cache miss, fetch from network
-	payload := map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "node_getL2Tips",
-		"params":  []any{},
-		"id":      1,
-	}
-
+	var l2Tips L2Tips
 	v.logger.Debug("Fetching L2 tips")
-	responseBody, err := v.client.DoRequest(ctx, v.rpcURL, payload)
+
+	err := v.rpcClient.CallContext(ctx, &l2Tips, "node_getL2Tips")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch L2 tips: %v", err)
 	}
 
-	var response L2TipsResponse
-	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return nil, &ErrParsingFailed{
-			What: "L2 tips response",
-			Err:  err,
-		}
-	}
-
 	// Create finalized block info
 	block := &FinalizedBlock{
-		Number: response.Result.Finalized.Number,
-		Hash:   response.Result.Finalized.Hash,
+		Number: l2Tips.Finalized.Number,
+		Hash:   l2Tips.Finalized.Hash,
 	}
 
 	// Update the cache
