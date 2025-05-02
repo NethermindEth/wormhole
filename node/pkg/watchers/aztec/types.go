@@ -171,15 +171,6 @@ type ExtendedPublicLog struct {
 	Log PublicLog `json:"log"`
 }
 
-// Error types
-type ErrNetworkUnavailable struct {
-	URL string
-}
-
-func (e ErrNetworkUnavailable) Error() string {
-	return "network unavailable: " + e.URL
-}
-
 type ErrRPCError struct {
 	Method string
 	Code   int
