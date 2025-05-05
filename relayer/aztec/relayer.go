@@ -30,15 +30,7 @@ var logger *zap.Logger
 func initLogger() {
 	var err error
 
-	// Check if we're in development mode
-	devMode := os.Getenv("DEV_MODE") == "true"
-	if devMode {
-		// Development logger - more human-readable
-		logger, err = zap.NewDevelopment()
-	} else {
-		// Production logger - JSON format, better for log aggregation
-		logger, err = zap.NewProduction()
-	}
+	logger, err = zap.NewProduction()
 
 	if err != nil {
 		// Fallback to standard logger if zap fails
