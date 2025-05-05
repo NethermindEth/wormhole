@@ -80,10 +80,10 @@ func (f *aztecBlockFetcher) FetchBlock(ctx context.Context, blockNumber int) (Bl
 	info := BlockInfo{}
 
 	// Set the block hash using the archive root
-	info.BlockHash = blockResult.Archive.Root
+	info.archiveRoot = blockResult.Archive.Root
 
 	// Set the parent hash using lastArchive.root
-	info.ParentHash = blockResult.Header.LastArchive.Root
+	info.parentArchiveRoot = blockResult.Header.LastArchive.Root
 
 	// Get the timestamp from global variables (remove 0x prefix and convert from hex)
 	timestampHex := strings.TrimPrefix(blockResult.Header.GlobalVariables.Timestamp, "0x")
@@ -120,8 +120,8 @@ func (f *aztecBlockFetcher) FetchBlock(ctx context.Context, blockNumber int) (Bl
 	// Log the block hash and parent hash for debugging
 	f.logger.Debug("Fetched block info",
 		zap.Int("blockNumber", blockNumber),
-		zap.String("blockHash", info.BlockHash),
-		zap.String("parentHash", info.ParentHash),
+		zap.String("archiveRoot", info.archiveRoot),
+		zap.String("parentArchiveRoot", info.parentArchiveRoot),
 		zap.Int("txCount", len(blockResult.Body.TxEffects)))
 
 	return info, nil

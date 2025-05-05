@@ -23,11 +23,11 @@ type LogParameters struct {
 
 // BlockInfo enhanced to include block hash and parent hash
 type BlockInfo struct {
-	TxHash          string
-	Timestamp       uint64
-	BlockHash       string
-	ParentHash      string
-	TxHashesByIndex map[int]string // Map of transaction hashes by their index in the block
+	TxHash            string
+	Timestamp         uint64
+	archiveRoot       string
+	parentArchiveRoot string
+	TxHashesByIndex   map[int]string // Map of transaction hashes by their index in the block
 }
 
 // FinalizedBlock represents a finalized block's information
