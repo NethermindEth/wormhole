@@ -59,10 +59,10 @@ func (v *aztecFinalityVerifier) GetLatestFinalizedBlockNumber() uint64 {
 	v.finalizedBlockCacheMu.RLock()
 	if v.finalizedBlockCache != nil && time.Since(v.finalizedBlockCacheTime) < v.finalizedBlockCacheTTL {
 		blockNum := v.finalizedBlockCache.Number
-		v.finalizedBlockCacheMu.RUnlock()
+		defer v.finalizedBlockCacheMu.RUnlock()
 		return uint64(blockNum)
 	}
-	v.finalizedBlockCacheMu.RUnlock()
+	defer v.finalizedBlockCacheMu.RUnlock()
 
 	// If no cache, fetch the latest finalized block
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -83,13 +83,13 @@ func (v *aztecFinalityVerifier) GetFinalizedBlock(ctx context.Context) (*Finaliz
 	v.finalizedBlockCacheMu.RLock()
 	if v.finalizedBlockCache != nil && time.Since(v.finalizedBlockCacheTime) < v.finalizedBlockCacheTTL {
 		block := v.finalizedBlockCache
-		v.finalizedBlockCacheMu.RUnlock()
+		defer v.finalizedBlockCacheMu.RUnlock()
 		v.logger.Debug("Using cached finalized block",
 			zap.Int("number", block.Number),
 			zap.String("hash", block.Hash))
 		return block, nil
 	}
-	v.finalizedBlockCacheMu.RUnlock()
+	defer v.finalizedBlockCacheMu.RUnlock()
 
 	// Cache miss, fetch from network
 	var l2Tips L2Tips

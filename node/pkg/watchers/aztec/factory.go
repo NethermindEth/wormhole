@@ -53,7 +53,7 @@ func NewWatcherFromConfig(
 		config := DefaultConfig(chainID, networkID, rpcURL, contractAddress)
 
 		// Create the block fetcher
-		blockFetcher, err := NewAztecBlockFetcher(rpcURL, logger)
+		blockFetcher, err := NewAztecBlockFetcher(ctx, rpcURL, logger)
 		if err != nil {
 			return fmt.Errorf("failed to create block fetcher: %v", err)
 		}
