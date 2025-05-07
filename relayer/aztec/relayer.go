@@ -37,9 +37,6 @@ func initLogger() {
 		fmt.Printf("Failed to initialize zap logger: %v\n", err)
 		logger = zap.NewExample()
 	}
-
-	// Ensure logger is flushed at program exit
-	defer logger.Sync()
 }
 
 // Config holds all configuration parameters for the relayer
