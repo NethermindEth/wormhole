@@ -57,7 +57,7 @@ func NewConfigFromEnv() Config {
 	return Config{
 		SpyRPCHost:       getEnvOrDefault("SPY_RPC_HOST", "localhost:7072"),
 		SourceChainID:    uint16(getEnvIntOrDefault("SOURCE_CHAIN_ID", 52)),
-		DestChainID:      uint16(getEnvIntOrDefault("DEST_CHAIN_ID", 10003)),
+		DestChainID:      uint16(getEnvIntOrDefault("DEST_CHAIN_ID", 10004)),
 		DestRPCURL:       getEnvOrDefault("DEST_RPC_URL", "http://localhost:8545"),
 		PrivateKey:       getEnvOrDefault("PRIVATE_KEY", "0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"),
 		WormholeContract: getEnvOrDefault("WORMHOLE_CONTRACT", "0x1b35884f8ba9371419d00ae228da9ff839edfe8fe6a804fdfcd430e0dc7e40db"),
