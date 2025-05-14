@@ -593,7 +593,7 @@ impl VAA {
         }
     }
 
-    pub fn get_guardian_set_index(vaa: Self) -> u32 {
+    pub fn get_guardian_set_index(vaa: Self) -> u32{
         vaa.guardian_set_index
     }
 
@@ -864,5 +864,3 @@ impl WormholeStorage {
         state
     }
 }
-
-

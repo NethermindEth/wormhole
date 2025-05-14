@@ -44,10 +44,10 @@ async function main() {
     .deployed();
   console.log(`Token deployed at ${token.address.toString()}`);
 
-  console.log(`Calling mint_to_public on token contract...`);
-  const token_contract = await Contract.at(token.address, TokenJsonContractArtifact, ownerWallet);
-  const tx_mint = await token_contract.methods.mint_to_public(ownerWallet.getAddress(), 1000).send().wait();
-  console.log(`Minted tokens`);
+  // console.log(`Calling mint_to_public on token contract...`);
+  // const token_contract = await Contract.at(token.address, TokenJsonContractArtifact, ownerWallet);
+  // const tx_mint = await token_contract.methods.mint_to_public(ownerWallet.getAddress(), 1000).send().wait();
+  // console.log(`Minted tokens`);
 
   // Test parameters 
   // TODO: replace with real values
@@ -67,7 +67,7 @@ async function main() {
     .send()
     .deployed();
 
-  console.log(`Token deployed at ${wormhole.address.toString()}`);
+  console.log(`Wormhole deployed at ${wormhole.address.toString()}`);
 
   const addresses = { wormhole: wormhole.address.toString() };
   writeFileSync('addresses.json', JSON.stringify(addresses, null, 2));
@@ -92,26 +92,26 @@ async function main() {
 
   console.log(`Sending message: "${message}"`);
 
-  console.log(`Calling set authwit on wormhole contract...`);
+  // console.log(`Calling set authwit on wormhole contract...`);
 
-  const action = await token_contract.withWallet(ownerWallet).methods.mint_to_public(
-    ownerWallet.getAddress(), 
-    receiverWallet.getAddress(), 
-    1000,
-    10
-  )
+  // const action = await token_contract.withWallet(ownerWallet).methods.mint_to_public(
+  //   ownerWallet.getAddress(), 
+  //   receiverWallet.getAddress(), 
+  //   1000,
+  //   10
+  // )
 
-  const set_authwit = await ownerWallet.setPublicAuthWit(
-    { caller: ownerWallet.getAddress(), action},
-    true
-  );
+  // const set_authwit = await ownerWallet.setPublicAuthWit(
+  //   { caller: ownerWallet.getAddress(), action},
+  //   true
+  // );
 
   console.log(`Calling publish_message on wormhole contract...`);
 
-  const _tx = contract.methods.publish_message(100,payload, 2);
+  const _tx = await contract.methods.publish_message(100,payload, 2).send().wait();
 
 
-  await set_authwit.send().wait();
+  // await set_authwit.send().wait();
 
   const sampleLogFilter = {
     txHash: '0x100ebe8cfa848587397b272a40426223004c5ee3838d22652c33e10c7fe7d1f7',

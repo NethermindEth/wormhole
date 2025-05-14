@@ -14,29 +14,31 @@ pub contract Wormhole {
         protocol_types::traits:: {Serialize, ToField}
     };
 
-    use dep::token::Token; 
+    // use dep::token::Token; 
     // token = { git = "https://github.com/Cheetah0x/aztec-standards-residency", tag = "dev", directory = "src/token_contract"}
     // token = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v0.84.0" , directory="noir-projects/noir-contracts/contracts/token_contract" }
-
-
-    // #[derive(Serialize)]
-    // struct WormholeMessage {
-    //     sender: AztecAddress,
-    //     sequence: u64,
-    //     nonce: u64,
-    //     consistency_level: u8,
-    //     timestamp: u64,
-    //     payload: [u8; 13],
-    //     payload2: [u8; 13], // TODO: size of payload needs investigation, looks like max size is Field's size unless we send multiple logs.
-    // } // MAX SIZE OF PAYLOAD IS...13
 
     #[storage]
     struct Storage<Context> {
         state: PublicMutable<WormholeStorage, Context>,
-        guardian_sets: Map<u64, PublicMutable<GuardianSet, Context>, Context>,
+        // guardian_sets: Map<u64, PublicMutable<GuardianSet, Context>, Context>,
         sequences: Map<AztecAddress, PublicMutable<u64, Context>, Context>,
         wormhole_address: PublicMutable<AztecAddress, Context>,
         token_address: PublicMutable<AztecAddress, Context>,
+        guardian_1: Map<u32, PublicMutable<Guardian, Context>, Context>, // FIXED 13 guardians
+        guardian_2: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_3: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_4: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_5: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_6: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_7: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_8: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_9: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_10: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_11: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_12: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_13: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        current_guardian_set_index: PublicMutable<u32, Context>,
     }
 
     #[public]
@@ -62,23 +64,140 @@ pub contract Wormhole {
         // Define the addresses for the wormhole account and token contract
         storage.wormhole_address.write(wormhole_address);
         storage.token_address.write(token_address);
-
+        storage.current_guardian_set_index.write(0 as u32);
     }
 
     #[public]
-    fn set_guardians(
-        initial_guardians: [[u8;20]; 19],
+    fn set_guardian1(
+        guardian: Guardian,
+        index: u32,
     ){ 
-        // Initialize the guardian sets
-        let mut new_guardians: [Guardian; 19] = [Guardian::default(); 19];
-        
-        for i in 0..19 { 
-            new_guardians[i] = Guardian::new(initial_guardians[i]);
-        }
-
-        let gs: GuardianSet = GuardianSet::new(0, new_guardians);
-        storage.guardian_sets.at(0).write(gs);
+        storage.guardian_1.at(index).write(guardian);
     }
+
+    #[public]
+    fn set_guardian2(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_2.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian3(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_3.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian4(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_4.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian5(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_5.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian6(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_6.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian7(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_7.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian8(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_8.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian9(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_9.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian10(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_10.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian11(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_11.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian12(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_12.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian13(
+        guardian: Guardian,
+        index: u32,
+    ){ 
+        storage.guardian_13.at(index).write(guardian);
+    }
+
+    // #[public]
+    // fn set_guardians(
+    //     initial_guardians: [[u8;20]; 13],
+    // ){ 
+    //     // Initialize the guardian sets
+    //     let mut new_guardians: [Guardian; 13] = [Guardian::default(); 13];
+        
+    //     for i in 0..13 { 
+    //         new_guardians[i] = Guardian::new(initial_guardians[i]);
+    //     }
+
+    //     storage.current_guardian_set_index.write(0);
+
+    //     storage.guardian_1.at(0).write(new_guardians[0]);
+    //     storage.guardian_2.at(0).write(new_guardians[1]);
+    //     storage.guardian_3.at(0).write(new_guardians[2]);
+    //     storage.guardian_4.at(0).write(new_guardians[3]);
+    //     storage.guardian_5.at(0).write(new_guardians[4]);
+    //     storage.guardian_6.at(0).write(new_guardians[5]);
+    //     storage.guardian_7.at(0).write(new_guardians[6]);
+    //     storage.guardian_8.at(0).write(new_guardians[7]);
+    //     storage.guardian_9.at(0).write(new_guardians[8]);
+    //     storage.guardian_10.at(0).write(new_guardians[9]);
+    //     storage.guardian_11.at(0).write(new_guardians[10]);
+    //     storage.guardian_12.at(0).write(new_guardians[11]);
+    //     storage.guardian_13.at(0).write(new_guardians[12]);
+    // }
 
     #[public]
     fn publish_message(
@@ -98,7 +217,7 @@ pub contract Wormhole {
             context.msg_sender().to_field(),
             sequence as Field,
             nonce as Field,
-            2 as Field, // TODO: CHECK FINALITY
+            2 as Field, 
             context.timestamp() as Field,
             Field::from_be_bytes(payloads[0]),
             Field::from_be_bytes(payloads[1]),
@@ -110,31 +229,31 @@ pub contract Wormhole {
             Field::from_be_bytes(payloads[7]),
         ];
 
-        let receiver_address = storage.wormhole_address.read();
-        let token_address = storage.token_address.read();
+        // let receiver_address = storage.wormhole_address.read();
+        // let token_address = storage.token_address.read();
 
         // deposit the message fee to wormhole token contract
-        let _ = Token::at(token_address).transfer_public_to_public(
-            context.msg_sender(),
-            receiver_address, 
-            message_fee,
-            sequence as Field,
-        ).call(&mut context);
+        // let _ = Token::at(token_address).transfer_public_to_public(
+        //     context.msg_sender(),
+        //     receiver_address, 
+        //     message_fee,
+        //     sequence as Field,
+        // ).call(&mut context);
 
         context.emit_public_log(msg);
 
         sequence
     }
 
-    #[public]
-    fn set_provider(provider: Provider) {
-        WormholeStorage::set_provider(storage.state.read(),provider);
-    }
+    // #[public]
+    // fn set_provider(provider: Provider) {
+    //     WormholeStorage::set_provider(storage.state.read(),provider);
+    // }
 
-    #[public]
-    fn get_provider() -> Provider {
-        WormholeStorage::get_provider(storage.state.read())
-    }
+    // #[public]
+    // fn get_provider() -> Provider {
+    //     WormholeStorage::get_provider(storage.state.read())
+    // }
 
     // #[public]
     // fn add_guardian_set(gs: GuardianSet) -> u64 {
@@ -149,20 +268,20 @@ pub contract Wormhole {
     //     storage.guardian_sets.at(index).read()
     // }
 
-    #[public]
-    fn expire_guardian_set(index: u64) {       
-        // Update the expiration time
-        let expiration_time = context.timestamp() + 86400;
+    // #[public]
+    // fn expire_guardian_set(index: u64) {       
+    //     // Update the expiration time
+    //     let expiration_time = context.timestamp() + 86400;
         
-        // Write the updated guardian set back to storage
-        GuardianSet::expire_guardian_set(&mut storage.guardian_sets.at(index).read(), context.timestamp(), expiration_time);
-    }
+    //     // Write the updated guardian set back to storage
+    //     GuardianSet::expire_guardian_set(&mut storage.guardian_sets.at(index).read(), context.timestamp(), expiration_time);
+    // }
 
-    #[public]
-    fn guardian_set_expired(index: u64) -> bool {
-        let current_idx = storage.state.read().guardian_set_index;
-        GuardianSet::is_active(storage.guardian_sets.at(index).read(), context.timestamp(), current_idx)
-    }
+    // #[public]
+    // fn guardian_set_expired(index: u64) -> bool {
+    //     let current_idx = storage.state.read().guardian_set_index;
+    //     GuardianSet::is_active(storage.guardian_sets.at(index).read(), context.timestamp(), current_idx)
+    // }
 
     // #[public]
     // fn set_message_fee(message_fee: u64) {
