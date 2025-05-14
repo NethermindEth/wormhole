@@ -57,8 +57,8 @@ module wormhole::wormhole {
         deployer: &signer,
         chain_id: u64,
         governance_chain_id: u64,
-        governance_contract: vector<u8>,
-        initial_guardians: vector<vector<u8>>
+        governance_contract: vector<u8>, 
+        initial_guardians: vector<vector<u8>> // vector of addresses
     ) {
         // account::SignerCapability can't be copied, so once it's stored into
         // state, the init function can no longer be called (since

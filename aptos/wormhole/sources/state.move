@@ -39,13 +39,13 @@ module wormhole::state {
 
     struct WormholeState has key {
         /// This chain's wormhole id
-        chain_id: U16,
+        chain_id: U16, // done
 
         /// Governance chain's id
-        governance_chain_id: U16,
+        governance_chain_id: U16, // done
 
         /// Address of governance contract on governance chain
-        governance_contract: ExternalAddress,
+        governance_contract: ExternalAddress, // done
 
         /// Mapping of guardian_set_index => guardian set
         guardian_sets: Table<u64, GuardianSet>,

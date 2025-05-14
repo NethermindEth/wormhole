@@ -12,6 +12,6 @@
     "start": "yarn build && LOG_LEVEL='info: token' node ./dest/CardGame.js"
   },
   "dependencies": {
-    "@aztec/accounts": "^0.81.0"
+    "@aztec/accounts": "0.85.0"
   }
 }
