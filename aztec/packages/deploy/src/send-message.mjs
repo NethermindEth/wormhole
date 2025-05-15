@@ -6,11 +6,13 @@ import WormholeJson from "../../../contracts/target/wormhole_contracts-Wormhole.
 
 const WormholeJsonContractArtifact = loadContractArtifact(WormholeJson);
 
-const { PXE_URL = 'http://localhost:8090' } = process.env;
+const { PXE_URL = 'http://localhost:8080' } = process.env;
 
 async function main() {
   const pxe = createPXEClient(PXE_URL);
   await waitForPXE(pxe);
+
+  console.log(`Connected to PXE at ${PXE_URL}`);
 
   // Read the deployed contract address from addresses.json
   let addresses;
@@ -20,13 +22,19 @@ async function main() {
     console.error("Error reading addresses.json file:", error);
     process.exit(1);
   }
+  
+  if (!addresses.wormhole) {
+    console.error("Wormhole contract address not found in addresses.json");
+    process.exit(1);
+  }
+
+  console.log("Addresses from addresses.json:", addresses);
 
   const [ownerWallet] = await getInitialTestAccountsWallets(pxe);
 
-
   // Connect to the already deployed contract
-  const contract = await Contract.at(addresses.token, WormholeJsonContractArtifact, ownerWallet);
-  console.log(`Connected to Wormhole contract at ${addresses.token}`);
+  const contract = await Contract.at(addresses.wormhole, WormholeJsonContractArtifact, ownerWallet);
+  console.log(`Connected to Wormhole contract at ${addresses.wormhole}`);
 
   // The message to send
   let message = "Hello World";
@@ -36,20 +44,25 @@ async function main() {
   let messageBytes = encoder.encode(message);
   
   // Create a padded array (try different sizes - this one is 32 bytes)
-  const PAYLOAD_SIZE = 32;
-  let paddedBytes = new Array(PAYLOAD_SIZE).fill(0);
+  const PAYLOAD_SIZE = 24;
+  let paddedBytes = new Array(PAYLOAD_SIZE).fill(1);
   
   // Copy the message bytes into the padded array
   for (let i = 0; i < messageBytes.length && i < PAYLOAD_SIZE; i++) {
     paddedBytes[i] = messageBytes[i];
   }
+
+  let payloads = [];
+  for (let i = 0; i < 8; i++) {
+    payloads.push(paddedBytes);
+  }
   
-  console.log(`Sending message: "${message}"`);
-  console.log(`Padded payload (${paddedBytes.length} bytes):`, paddedBytes);
+  console.log(`Sending message: "${messageBytes} 8 times"`);
+  console.log(`Padded payload (${paddedBytes.length} bytes):`, payloads);
   
   // Send the message with nonce 100 and consistency level 2
   console.log("Sending transaction...");
-  const tx = await contract.methods.publish_message(100, paddedBytes, 1).send();
+  const tx = await contract.methods.publish_message(100, payloads, 1).send();
   
   // Wait for the transaction to be mined
   const receipt = await tx.wait();
