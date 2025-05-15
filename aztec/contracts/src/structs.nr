@@ -202,90 +202,6 @@ fn test_get_guardian_address() {
     assert_eq(address[19], 0);
 }
 
-#[derive(Deserialize, Packable, Serialize)]
-pub struct GuardianSet {
-    pub index: u64,
-    pub expiration_time: u64,
-    // guardians: [Guardian; 19], // Assume 19 guardians 
-    pub guardian0: Guardian, 
-    pub guardian1: Guardian, 
-    pub guardian2: Guardian,
-    pub guardian3: Guardian,
-    pub guardian4: Guardian,
-    pub guardian5: Guardian,
-    pub guardian6: Guardian,
-    pub guardian7: Guardian,
-    pub guardian8: Guardian,
-    pub guardian9: Guardian,
-    pub guardian10: Guardian,
-    pub guardian11: Guardian,
-    pub guardian12: Guardian,
-    pub guardian13: Guardian,
-    pub guardian14: Guardian,
-    pub guardian15: Guardian,
-    pub guardian16: Guardian,
-    pub guardian17: Guardian,
-    pub guardian18: Guardian,
-}
-
-impl GuardianSet {
-    pub fn new(idx: u64, gs: [Guardian; 19]) -> GuardianSet {
-        GuardianSet {
-            expiration_time: 0,
-            index: idx,
-            guardian0: gs[0],
-            guardian1: gs[1],
-            guardian2: gs[2],
-            guardian3: gs[3],
-            guardian4: gs[4],
-            guardian5: gs[5],
-            guardian6: gs[6],
-            guardian7: gs[7],
-            guardian8: gs[8],
-            guardian9: gs[9],
-            guardian10: gs[10],
-            guardian11: gs[11],
-            guardian12: gs[11],
-            guardian13: gs[12],
-            guardian14: gs[13],
-            guardian15: gs[14],
-            guardian16: gs[15],
-            guardian17: gs[16],
-            guardian18: gs[17],
-        }
-    }
-
-    pub fn get_guardians(gs: GuardianSet) -> [Guardian; 19] {
-        [
-            gs.guardian0, gs.guardian1, gs.guardian2, gs.guardian3, gs.guardian4, gs.guardian5, gs.guardian6, gs.guardian7, gs.guardian8, gs.guardian9,gs.guardian10,gs.guardian11,gs.guardian12,gs.guardian13, gs.guardian14,gs.guardian15,gs.guardian16, gs.guardian17, gs.guardian18
-        ]
-    }
-
-    pub fn get_guardian_set_index(gs: GuardianSet) -> u64 {
-        gs.index
-    }
-
-    pub fn get_guardian_set_expiration_time(gs: GuardianSet) -> u64 {
-        gs.expiration_time
-    }
-
-    pub fn update_guardian_set_index(gs: &mut GuardianSet, index: u64) {
-        gs.index = index;
-    }
-
-    pub fn expire_guardian_set(gs: &mut GuardianSet, now: u64, expiration_time: u64) {
-        gs.expiration_time = now + expiration_time;
-    }
-
-    pub fn is_active(gs: GuardianSet, now: u64, index: u64) -> bool {
-        if gs.expiration_time > now {
-            true
-        } else {
-            gs.index == index
-        }
-    }
-}
-
 #[derive(Deserialize, Serialize)]
 pub struct Signature {
     pub r: [u8; 32],
@@ -735,7 +651,7 @@ pub struct GuardianSetUpgrade {
     module: [u8; 32],
     action: u8,
     chain: u16,
-    new_guardian_set: GuardianSet,
+    // new_guardian_set: GuardianSet,
     new_guardian_set_index: u32
 }
 

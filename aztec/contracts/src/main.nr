@@ -3,7 +3,7 @@ mod structs;
 
 #[aztec]
 pub contract Wormhole {
-    use crate::structs::{Provider, GuardianSet, Guardian, WormholeStorage};
+    use crate::structs::{Provider, Guardian, WormholeStorage};
 
     use dep::aztec::{
         macros::{
@@ -15,13 +15,10 @@ pub contract Wormhole {
     };
 
     // use dep::token::Token; 
-    // token = { git = "https://github.com/Cheetah0x/aztec-standards-residency", tag = "dev", directory = "src/token_contract"}
-    // token = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v0.84.0" , directory="noir-projects/noir-contracts/contracts/token_contract" }
 
     #[storage]
     struct Storage<Context> {
         state: PublicMutable<WormholeStorage, Context>,
-        // guardian_sets: Map<u64, PublicMutable<GuardianSet, Context>, Context>,
         sequences: Map<AztecAddress, PublicMutable<u64, Context>, Context>,
         wormhole_address: PublicMutable<AztecAddress, Context>,
         token_address: PublicMutable<AztecAddress, Context>,
@@ -38,24 +35,19 @@ pub contract Wormhole {
         guardian_11: Map<u32, PublicMutable<Guardian, Context>, Context>,
         guardian_12: Map<u32, PublicMutable<Guardian, Context>, Context>,
         guardian_13: Map<u32, PublicMutable<Guardian, Context>, Context>,
-        current_guardian_set_index: PublicMutable<u32, Context>,
+        current_guardian_set_index: Map<u32, PublicMutable<u64, Context>, Context>, // map index to expiration time
     }
 
     #[public]
     #[initializer]
     fn init(
         chain_id: u16,
-        // governance_chain_id: u16,
-        // governance_contract: Field,
         evm_chain_id: u16,
-        // initial_guardians: [[u8;20]; 19],
-        wormhole_address: AztecAddress, // QUESTION FOR OSSIE: WHO IS THIS? WHERE DO WE GET THE DEPOSIT ADDRESS? WHAT TOKEN ARE WE SENDING?
+        wormhole_address: AztecAddress, // TODO: WHO IS THIS? WHERE DO WE GET THE DEPOSIT ADDRESS? WHAT TOKEN ARE WE SENDING?
         token_address: AztecAddress, // TODO: DEPLOY THIS BEFORE DEPLOYING WORMHOLE (MUST EXIST ALREADY)
     ) {
         let provider: Provider = Provider {
             chain_id,
-            // governance_chain_id,
-            // governance_contract,
             evm_chain_id,
         };
         // Initialize the wormhole state storage
@@ -64,7 +56,7 @@ pub contract Wormhole {
         // Define the addresses for the wormhole account and token contract
         storage.wormhole_address.write(wormhole_address);
         storage.token_address.write(token_address);
-        storage.current_guardian_set_index.write(0 as u32);
+        storage.current_guardian_set_index.at(0).write(18_446_744_073_709_551_615); // 2^64 - 1
     }
 
     #[public]
@@ -171,33 +163,20 @@ pub contract Wormhole {
         storage.guardian_13.at(index).write(guardian);
     }
 
-    // #[public]
-    // fn set_guardians(
-    //     initial_guardians: [[u8;20]; 13],
-    // ){ 
-    //     // Initialize the guardian sets
-    //     let mut new_guardians: [Guardian; 13] = [Guardian::default(); 13];
-        
-    //     for i in 0..13 { 
-    //         new_guardians[i] = Guardian::new(initial_guardians[i]);
-    //     }
+    #[public]
+    fn expire_guardian_set(
+        index: u32,
+    ) {
+        storage.current_guardian_set_index.at(index).write(context.timestamp() + 86400);
+    }
 
-    //     storage.current_guardian_set_index.write(0);
-
-    //     storage.guardian_1.at(0).write(new_guardians[0]);
-    //     storage.guardian_2.at(0).write(new_guardians[1]);
-    //     storage.guardian_3.at(0).write(new_guardians[2]);
-    //     storage.guardian_4.at(0).write(new_guardians[3]);
-    //     storage.guardian_5.at(0).write(new_guardians[4]);
-    //     storage.guardian_6.at(0).write(new_guardians[5]);
-    //     storage.guardian_7.at(0).write(new_guardians[6]);
-    //     storage.guardian_8.at(0).write(new_guardians[7]);
-    //     storage.guardian_9.at(0).write(new_guardians[8]);
-    //     storage.guardian_10.at(0).write(new_guardians[9]);
-    //     storage.guardian_11.at(0).write(new_guardians[10]);
-    //     storage.guardian_12.at(0).write(new_guardians[11]);
-    //     storage.guardian_13.at(0).write(new_guardians[12]);
-    // }
+    #[public]
+    fn guardian_set_expired(
+        index: u32,
+    ) -> bool {
+        let timestamp = storage.current_guardian_set_index.at(index).read();
+        context.timestamp() > timestamp
+    }
 
     #[public]
     fn publish_message(
@@ -245,128 +224,13 @@ pub contract Wormhole {
         sequence
     }
 
-    // #[public]
-    // fn set_provider(provider: Provider) {
-    //     WormholeStorage::set_provider(storage.state.read(),provider);
-    // }
+    #[public]
+    fn set_provider(provider: Provider) {
+        WormholeStorage::set_provider(storage.state.read(),provider);
+    }
 
-    // #[public]
-    // fn get_provider() -> Provider {
-    //     WormholeStorage::get_provider(storage.state.read())
-    // }
-
-    // #[public]
-    // fn add_guardian_set(gs: GuardianSet) -> u64 {
-    //     let to = gs.index;
-    //     storage.guardian_sets.at(to).write(gs);
-    //     // returns storage slot for key
-    //     to
-    // }
-
-    // #[public]
-    // fn get_guardian_set(index: u64) -> GuardianSet {
-    //     storage.guardian_sets.at(index).read()
-    // }
-
-    // #[public]
-    // fn expire_guardian_set(index: u64) {       
-    //     // Update the expiration time
-    //     let expiration_time = context.timestamp() + 86400;
-        
-    //     // Write the updated guardian set back to storage
-    //     GuardianSet::expire_guardian_set(&mut storage.guardian_sets.at(index).read(), context.timestamp(), expiration_time);
-    // }
-
-    // #[public]
-    // fn guardian_set_expired(index: u64) -> bool {
-    //     let current_idx = storage.state.read().guardian_set_index;
-    //     GuardianSet::is_active(storage.guardian_sets.at(index).read(), context.timestamp(), current_idx)
-    // }
-
-    // #[public]
-    // fn set_message_fee(message_fee: u64) {
-    //     storage.state.write(WormholeStorage::set_message_fee(storage.state.read(), message_fee));
-    // }
-
-    // #[public]
-    // fn get_message_fee() -> u64 {
-    //     storage.state.read().message_fee
-    // }
-
-    // #[public]
-    // fn get_guardian_set_index() -> u64 {
-    //     storage.state.read().guardian_set_index
-    // }
-
-    // #[public]
-    // fn get_chain_id() -> u16 {
-    //     storage.state.read().get_chain_id()
-    // }
-
-    // TODO: finish getters & setters for state variables
-
-    // #[public]
-    // fn add_sequence(to: AztecAddress, sequence: Field) -> Field {
-    //     storage.sequences.at(to).write(sequence);
-    //     // returns storage slot for key
-    //     derive_storage_slot_in_map(storage.sequences.storage_slot, to)
-    // }
-
-    // #[public]
-    // fn get_sequences(address: AztecAddress) -> Field {
-    //     storage.sequences.at(address).read()
-    // }
-
-    // #[public]
-    // fn set_initialized_implementation(to: Field, ii: bool) -> Field {
-    //     storage.initialized_implementations.at(to).write(ii);
-    //     // returns storage slot for key
-    //     derive_storage_slot_in_map(storage.initialized_implementations.storage_slot, to)
-    // }
-
-    // #[public]
-    // fn get_initialized_implementations(address: Field) -> bool {
-    //     storage.initialized_implementations.at(address).read()
-    // }
-
-    // // Publish a message to be attested by the Wormhole network
-    // #[public]
-    // fn publishMessage(
-    //     nonce: u32,
-    //     payload: [u8; 24], // size of payload needs investigation, looks like max size is Field's size unless we send multiple logs.
-    //     consistencyLevel: u8
-    //     ) {
-    //     // check fee
-    //     assert(context.transaction_fee() == get_message_fee(), "invalid fee");
-
-    //     let sequence = useSequence(context.msg_sender());
-        
-    //     // Create an array of Field elements
-    //     let message = [
-    //         context.msg_sender().to_field(),
-    //         sequence,  // Already a Field
-    //         Field::from(nonce),
-    //         Field::from(consistencyLevel),
-    //         Field::from_be_bytes(payload),
-    //         Field::from_be_bytes(payload),
-    //         Field::from_be_bytes(payload),
-    //         Field::from_be_bytes(payload),
-    //         Field::from_be_bytes(payload),
-    //         Field::from_be_bytes(payload),
-    //         Field::from_be_bytes(payload),
-    //         Field::from_be_bytes(payload),
-    //         Field::from_be_bytes(payload)
-    //     ];
-        
-    //     // emit log
-    //     context.emit_public_log(message);
-    // }
-
-    // #[public]
-    // fn useSequence(emitter: AztecAddress) -> Field {
-    //     let sequence = get_sequences(emitter);
-    //     add_sequence(emitter, sequence + 1);
-    //     sequence
-    // }
-
+    #[public]
+    fn get_provider() -> Provider {
+        WormholeStorage::get_provider(storage.state.read())
+    }
 }
