@@ -3,13 +3,13 @@ import { getInitialTestAccountsWallets } from '@aztec/accounts/testing';
 import { Contract, createPXEClient, loadContractArtifact, waitForPXE } from '@aztec/aztec.js';
 import { ExtendedPublicLog } from '@aztec/stdlib/logs';
 import WormholeJson from "../../../contracts/target/wormhole_contracts-Wormhole.json" assert { type: "json" };
-// import { TokenContract } from '@aztec/noir-contracts.js/Token'; // TODO: FIND THIS!!!! WILL SOLVE THE TOKEN ISSUE
+// import { TokenContract } from '@aztec'; // TODO: FIND THIS!!!! WILL SOLVE THE TOKEN ISSUE
 
 import { writeFileSync } from 'fs';
 
 const WormholeJsonContractArtifact = loadContractArtifact(WormholeJson);
 
-const { PXE_URL = 'http://localhost:8080' } = process.env;
+const { PXE_URL = 'http://localhost:8090' } = process.env;
 
 // Call `aztec-nargo compile` to compile the contract
 // Call `aztec codegen ./src -o src/artifacts/` to generate the contract artifacts
@@ -26,8 +26,8 @@ const { PXE_URL = 'http://localhost:8080' } = process.env;
 //   const contract = await TokenContract.deploy(
 //     adminWallet,
 //     adminWallet.getAddress(),
-//     "TokenName",
-//     "TokenSymbol",
+//     "WormholeToken",
+//     "WORM",
 //     18
 //   )
 //     .send()
@@ -72,14 +72,14 @@ async function main() {
   console.log(`Owner address: ${ownerAddress}`);
   console.log(`Receiver address: ${receiverWallet.getAddress()}`);
 
-  let guardians = [];
+  // let guardians = [];
 
-  for (let i = 0; i < 19; i++) {
-    guardians[i] = []; 
-    for (let j = 0; j < 20; j++) {
-      guardians[i][j] = j + 1;
-    }
-  }
+  // for (let i = 0; i < 19; i++) {
+  //   guardians[i] = []; 
+  //   for (let j = 0; j < 20; j++) {
+  //     guardians[i][j] = j+1;
+  //   }
+  // }
 
   // let token = await deployToken(ownerWallet, 1000n);
 
@@ -125,15 +125,25 @@ async function main() {
   // Using TextEncoder (modern approach)
   let encoder = new TextEncoder();
   let bytes = encoder.encode(message);
+
+  // Create a padded array (try different sizes - this one is 31 bytes)
+  const PAYLOAD_SIZE = 31;
+  let paddedBytes = new Array(PAYLOAD_SIZE).fill(0);
+  
+  // Copy the message bytes into the padded array
+  for (let i = 0; i < bytes.length && i < PAYLOAD_SIZE; i++) {
+    paddedBytes[i] = bytes[i];
+  }
   
   // TODO: replace with real values
   let payload = [];
   for (let i = 0; i < 8; i++) {
-    payload.push(bytes);
+    payload.push(paddedBytes);
   }
 
   console.log(`Calling publish_message with message "${message}" on wormhole contract...`);
-  const _tx = await contract.methods.publish_message(100, payload, 2).send().wait();
+  console.log(`Payload: ${payload}`);
+  const _tx = await contract.methods.publish_message(100, payload, 2,2).send().wait();
 
   const sampleLogFilter = {
     txHash: '0x100ebe8cfa848587397b272a40426223004c5ee3838d22652c33e10c7fe7d1f7',

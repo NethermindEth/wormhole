@@ -181,8 +181,9 @@ pub contract Wormhole {
     #[public]
     fn publish_message(
         nonce: u64,
-        payloads: [[u8; 24]; 8], // size of payload needs investigation, looks like max size is Field's size unless we send multiple logs.
+        payloads: [[u8; 31]; 8], // size of payload needs investigation, looks like max size is Field's size unless we send multiple logs.
         message_fee: u128,
+        consistency: u8,
     ) -> u64 {
         // check fee
         assert(storage.state.read().message_fee <= message_fee, "insufficient fee");
@@ -193,25 +194,25 @@ pub contract Wormhole {
 
         // prepare message
         let msg = [
-            context.msg_sender().to_field(),
-            sequence as Field,
+            context.msg_sender().to_field(), 
+            sequence as Field,  
             nonce as Field,
-            2 as Field, 
+            consistency as Field, 
             context.timestamp() as Field,
-            Field::from_be_bytes(payloads[0]),
-            Field::from_be_bytes(payloads[1]),
-            Field::from_be_bytes(payloads[2]),
-            Field::from_be_bytes(payloads[3]),
-            Field::from_be_bytes(payloads[4]),
-            Field::from_be_bytes(payloads[5]),
-            Field::from_be_bytes(payloads[6]),
-            Field::from_be_bytes(payloads[7]),
+            Field::from_le_bytes(payloads[0]),
+            Field::from_le_bytes(payloads[1]),
+            Field::from_le_bytes(payloads[2]),
+            Field::from_le_bytes(payloads[3]),
+            Field::from_le_bytes(payloads[4]),
+            Field::from_le_bytes(payloads[5]),
+            Field::from_le_bytes(payloads[6]),
+            Field::from_le_bytes(payloads[7]),
         ];
 
-        let receiver_address = storage.wormhole_address.read();
-        let token_address = storage.token_address.read();
+        // let receiver_address = storage.wormhole_address.read();
+        // let token_address = storage.token_address.read();
 
-        // deposit the message fee to wormhole token contract
+        // // deposit the message fee to wormhole token contract
         // let _ = Token::at(token_address).transfer_in_public(
         //     context.msg_sender(),
         //     receiver_address, 

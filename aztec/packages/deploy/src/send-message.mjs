@@ -6,7 +6,7 @@ import WormholeJson from "../../../contracts/target/wormhole_contracts-Wormhole.
 
 const WormholeJsonContractArtifact = loadContractArtifact(WormholeJson);
 
-const { PXE_URL = 'http://localhost:8080' } = process.env;
+const { PXE_URL = 'http://localhost:8090' } = process.env;
 
 async function main() {
   const pxe = createPXEClient(PXE_URL);
@@ -43,9 +43,9 @@ async function main() {
   let encoder = new TextEncoder();
   let messageBytes = encoder.encode(message);
   
-  // Create a padded array (try different sizes - this one is 32 bytes)
-  const PAYLOAD_SIZE = 24;
-  let paddedBytes = new Array(PAYLOAD_SIZE).fill(1);
+  // Create a padded array (try different sizes - this one is 31 bytes)
+  const PAYLOAD_SIZE = 31;
+  let paddedBytes = new Array(PAYLOAD_SIZE).fill(0);
   
   // Copy the message bytes into the padded array
   for (let i = 0; i < messageBytes.length && i < PAYLOAD_SIZE; i++) {
@@ -62,7 +62,7 @@ async function main() {
   
   // Send the message with nonce 100 and consistency level 2
   console.log("Sending transaction...");
-  const tx = await contract.methods.publish_message(100, payloads, 1).send();
+  const tx = await contract.methods.publish_message(100, payloads, 1,2).send();
   
   // Wait for the transaction to be mined
   const receipt = await tx.wait();
