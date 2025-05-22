@@ -14,7 +14,7 @@ pub contract Wormhole {
         protocol_types::traits::ToField
     };
 
-    // use dep::token::Token; 
+    use dep::token::Token; 
 
     #[storage]
     struct Storage<Context> {
@@ -43,8 +43,8 @@ pub contract Wormhole {
     fn init(
         chain_id: u16,
         evm_chain_id: u16,
-        wormhole_address: AztecAddress, // TODO: WHO IS THIS? WHERE DO WE GET THE DEPOSIT ADDRESS? WHAT TOKEN ARE WE SENDING?
-        // token_address: AztecAddress, // TODO: DEPLOY THIS BEFORE DEPLOYING WORMHOLE (MUST EXIST ALREADY)
+        wormhole_address: AztecAddress, 
+        token_address: AztecAddress, 
     ) {
         let provider: Provider = Provider {
             chain_id,
@@ -55,9 +55,57 @@ pub contract Wormhole {
 
         // Define the addresses for the wormhole account and token contract
         storage.wormhole_address.write(wormhole_address);
-        // storage.token_address.write(token_address);
+        storage.token_address.write(token_address);
         storage.current_guardian_set_index.at(0).write(18_446_744_073_709_551_615); // 2^64 - 1
     }
+
+    #[public]
+    fn publish_message(
+        nonce: u64,
+        payloads: [[u8; 31]; 8], // size of payload needs investigation, looks like max size is Field's size unless we send multiple logs.
+        message_fee: u128,
+        consistency: u8,
+    ) -> u64 {
+        // check fee
+        assert(storage.state.read().message_fee <= message_fee, "insufficient fee");
+
+        // increase current sequence
+        let sequence = storage.sequences.at(context.msg_sender()).read();
+        storage.sequences.at(context.msg_sender()).write(sequence + 1);
+
+        // prepare message
+        let msg = [
+            context.msg_sender().to_field(), 
+            sequence as Field,  
+            nonce as Field,
+            consistency as Field, 
+            context.timestamp() as Field,
+            Field::from_le_bytes(payloads[0]),
+            Field::from_le_bytes(payloads[1]),
+            Field::from_le_bytes(payloads[2]),
+            Field::from_le_bytes(payloads[3]),
+            Field::from_le_bytes(payloads[4]),
+            Field::from_le_bytes(payloads[5]),
+            Field::from_le_bytes(payloads[6]),
+            Field::from_le_bytes(payloads[7]),
+        ];
+
+        let receiver_address = storage.wormhole_address.read();
+        let token_address = storage.token_address.read();
+
+        // deposit the message fee to wormhole token contract
+        let _ = Token::at(token_address).transfer_in_public(
+            context.msg_sender(),
+            receiver_address, 
+            message_fee,
+            31 as Field, // for simplicity when calling this from offchain 
+        ).call(&mut context);
+
+        context.emit_public_log(msg);
+
+        sequence
+    }
+
 
     #[public]
     fn set_guardian1(
@@ -176,53 +224,6 @@ pub contract Wormhole {
     ) -> bool {
         let timestamp = storage.current_guardian_set_index.at(index).read();
         context.timestamp() > timestamp
-    }
-
-    #[public]
-    fn publish_message(
-        nonce: u64,
-        payloads: [[u8; 31]; 8], // size of payload needs investigation, looks like max size is Field's size unless we send multiple logs.
-        message_fee: u128,
-        consistency: u8,
-    ) -> u64 {
-        // check fee
-        assert(storage.state.read().message_fee <= message_fee, "insufficient fee");
-
-        // increase current sequence
-        let sequence = storage.sequences.at(context.msg_sender()).read();
-        storage.sequences.at(context.msg_sender()).write(sequence + 1);
-
-        // prepare message
-        let msg = [
-            context.msg_sender().to_field(), 
-            sequence as Field,  
-            nonce as Field,
-            consistency as Field, 
-            context.timestamp() as Field,
-            Field::from_le_bytes(payloads[0]),
-            Field::from_le_bytes(payloads[1]),
-            Field::from_le_bytes(payloads[2]),
-            Field::from_le_bytes(payloads[3]),
-            Field::from_le_bytes(payloads[4]),
-            Field::from_le_bytes(payloads[5]),
-            Field::from_le_bytes(payloads[6]),
-            Field::from_le_bytes(payloads[7]),
-        ];
-
-        // let receiver_address = storage.wormhole_address.read();
-        // let token_address = storage.token_address.read();
-
-        // // deposit the message fee to wormhole token contract
-        // let _ = Token::at(token_address).transfer_in_public(
-        //     context.msg_sender(),
-        //     receiver_address, 
-        //     message_fee,
-        //     sequence as Field,
-        // ).call(&mut context);
-
-        context.emit_public_log(msg);
-
-        sequence
     }
 
     #[public]
