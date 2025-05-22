@@ -13,7 +13,6 @@ import (
 	"time"
 
 	spyv1 "github.com/certusone/wormhole/node/pkg/proto/spy/v1"
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -184,61 +183,6 @@ func NewEVMClient(rpcURL, privateKeyHex string) (*EVMClient, error) {
 // GetAddress returns the public address for this client
 func (c *EVMClient) GetAddress() common.Address {
 	return c.address
-}
-
-// callVerify performs a read-only call to the verify function to check if a VAA is valid
-func (c *EVMClient) callVerify(ctx context.Context, targetContract string, vaaBytes []byte) (bool, error) {
-	c.logger.Debug("Preparing to verify VAA",
-		zap.Int("length", len(vaaBytes)))
-
-	const abiJSON = `[{
-        "inputs": [{"internalType": "bytes", "name": "encodedVm", "type": "bytes"}],
-        "name": "verify",
-        "outputs": [],
-        "stateMutability": "view",
-        "type": "function"
-    }]`
-
-	parsedABI, err := abi.JSON(strings.NewReader(abiJSON))
-	if err != nil {
-		return false, fmt.Errorf("ABI parse error: %v", err)
-	}
-
-	data, err := parsedABI.Pack("verify", vaaBytes)
-	if err != nil {
-		return false, fmt.Errorf("ABI pack error: %v", err)
-	}
-
-	targetAddr := common.HexToAddress(targetContract)
-	msg := ethereum.CallMsg{
-		To:   &targetAddr,
-		Data: data,
-	}
-
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	// Make the call
-	_, err = c.client.CallContract(ctxWithTimeout, msg, nil)
-	if err != nil {
-		// Check if it's a revert error
-		if revertErr, ok := err.(interface {
-			Error() string
-			ErrorData() []byte
-		}); ok {
-			revertData := revertErr.ErrorData()
-
-			reason, decodeErr := abi.UnpackRevert(revertData)
-			if decodeErr == nil {
-				c.logger.Debug("Contract reverted with reason", zap.String("reason", reason))
-				return false, fmt.Errorf("contract revert: %s", reason)
-			}
-		}
-		return false, fmt.Errorf("verification failed: %v", err)
-	}
-
-	// If we reach here, the verification succeeded (no error means it passed)
-	return true, nil
 }
 
 // sendVerifyTransaction sends a transaction to the verify function to process and store a VAA
