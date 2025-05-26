@@ -8,7 +8,7 @@ import { writeFileSync } from 'fs';
 
 const WormholeJsonContractArtifact = loadContractArtifact(WormholeJson);
 
-const { PXE_URL = 'http://localhost:8090' } = process.env;
+const { PXE_URL = 'http://localhost:8080' } = process.env;
 
 // Call `aztec-nargo compile` to compile the contract
 // Call `aztec codegen ./src -o src/artifacts/` to generate the contract artifacts
@@ -89,7 +89,7 @@ async function main() {
 
   console.log(`Wormhole deployed at ${wormhole.address.toString()}`);
 
-  const addresses = { wormhole: wormhole.address.toString() };
+  const addresses = { wormhole: wormhole.address.toString(), token: token.address.toString() };
   writeFileSync('addresses.json', JSON.stringify(addresses, null, 2));
 
   const contract = await Contract.at(wormhole.address, WormholeJsonContractArtifact, ownerWallet);
