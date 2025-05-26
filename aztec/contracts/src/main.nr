@@ -65,6 +65,7 @@ pub contract Wormhole {
         payloads: [[u8; 31]; 8], // size of payload needs investigation, looks like max size is Field's size unless we send multiple logs.
         message_fee: u128,
         consistency: u8,
+        from: AztecAddress, // explicitly pass token sender address
     ) -> u64 {
         // check fee
         assert(storage.state.read().message_fee <= message_fee, "insufficient fee");
@@ -95,7 +96,7 @@ pub contract Wormhole {
 
         // deposit the message fee to wormhole token contract
         let _ = Token::at(token_address).transfer_in_public(
-            context.msg_sender(),
+            from,
             receiver_address, 
             message_fee,
             31 as Field, // for simplicity when calling this from offchain 
