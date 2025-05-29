@@ -66,6 +66,7 @@ pub contract Wormhole {
         message_fee: u128,
         consistency: u8,
         from: AztecAddress, // explicitly pass token sender address
+        token_nonce: Field,
     ) -> u64 {
         // check fee
         assert(storage.state.read().message_fee <= message_fee, "insufficient fee");
@@ -99,7 +100,7 @@ pub contract Wormhole {
             from,
             receiver_address, 
             message_fee,
-            31 as Field, // for simplicity when calling this from offchain 
+            token_nonce,  
         ).call(&mut context);
 
         context.emit_public_log(msg);

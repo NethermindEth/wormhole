@@ -123,7 +123,7 @@ async function main() {
     ownerAddress,
     receiverWallet.getAddress(),
     2n,
-    31n
+    0n
   );  
   // generate authwit to allow for wormhole to send funds to itself on behalf of owner
   const validateActionInteraction = await ownerWallet.setPublicAuthWit(
@@ -136,7 +136,7 @@ async function main() {
 
   await validateActionInteraction.send().wait();
 
-  const _tx = await contract.methods.publish_message(100, payload, 2n,2, ownerAddress).send().wait();
+  const _tx = await contract.methods.publish_message(100, payload, 2n,2, ownerAddress, 0n).send().wait();
 
   let receiver_balance = await token.methods.balance_of_public(receiverWallet.getAddress()).simulate();
 
