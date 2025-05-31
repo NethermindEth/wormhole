@@ -81,18 +81,18 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog, bloc
 	}
 
 	// Skip empty logs
-	if len(extLog.Log.Log) == 0 {
+	if len(extLog.Log.Fields) == 0 {
 		return nil
 	}
 
 	// Extract event parameters
-	params, err := w.parseLogParameters(extLog.Log.Log)
+	params, err := w.parseLogParameters(extLog.Log.Fields)
 	if err != nil {
 		return fmt.Errorf("failed to parse log parameters: %v", err)
 	}
 
 	// Create message payload
-	payload := w.createPayload(extLog.Log.Log)
+	payload := w.createPayload(extLog.Log.Fields)
 
 	// Create a unique ID for this observation
 	observationID := CreateObservationID(params.SenderAddress.String(), params.Sequence, extLog.ID.BlockNumber)
@@ -101,7 +101,8 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog, bloc
 	w.logger.Info("Processing message",
 		zap.Stringer("emitter", params.SenderAddress),
 		zap.Uint64("sequence", params.Sequence),
-		zap.Uint8("consistencyLevel", params.ConsistencyLevel))
+		zap.Uint8("consistencyLevel", params.ConsistencyLevel),
+		zap.Int("payloadLength", len(payload)))
 
 	// Check for context cancellation before proceeding
 	select {

@@ -164,7 +164,8 @@ type LogId struct {
 
 type PublicLog struct {
 	ContractAddress string   `json:"contractAddress"`
-	Log             []string `json:"log"`
+	Fields          []string `json:"fields"`
+	EmittedLength   int      `json:"emittedLength"`
 }
 
 type ExtendedPublicLog struct {
