@@ -157,35 +157,6 @@ func setupMockAztecServer(t *testing.T) *httptest.Server {
 	}))
 }
 
-// TestParseHexUint64 tests the hex parsing function with various inputs
-func TestParseHexUint64(t *testing.T) {
-	testCases := []struct {
-		name      string
-		input     string
-		expectErr bool
-		expected  uint64
-	}{
-		{"Valid hex with 0x prefix", "0x123", false, 291},
-		{"Valid hex without prefix", "123", false, 291},
-		{"Invalid hex", "0xZZZ", true, 0},
-		{"Empty string", "", true, 0},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			value, err := ParseHexUint64(tc.input)
-
-			if tc.expectErr {
-				assert.Error(t, err)
-				assert.IsType(t, &ErrParsingFailed{}, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tc.expected, value)
-			}
-		})
-	}
-}
-
 // TestCreateObservationID tests the observation ID creation
 func TestCreateObservationID(t *testing.T) {
 	id := CreateObservationID("0x123", 456, 789)

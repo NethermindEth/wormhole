@@ -96,7 +96,7 @@ func (c *WatcherConfig) Create(
 	env common.Environment,
 ) (interfaces.L1Finalizer, supervisor.Runnable, interfaces.Reobserver, error) {
 	// Create the runnable and L1Finalizer
-	l1Finalizer, runnable := NewWatcherFromConfig(c.ChainID, string(c.NetworkID), c.Rpc, c.Contract, msgC, obsvReqC)
+	l1Finalizer, runnable := NewWatcherFromConfig(c.ChainID, string(c.NetworkID), c.Rpc, "0x11b7dae0d5a563543c1f458c5e33f36e2d6c9e6b44a90890093ae08912c7f780", msgC, obsvReqC)
 
 	// Return the L1Verifier as an L1Finalizer along with the runnable
 	// This makes it available to the framework if needed

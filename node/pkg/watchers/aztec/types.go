@@ -19,6 +19,10 @@ type LogParameters struct {
 	Sequence         uint64
 	Nonce            uint32
 	ConsistencyLevel uint8
+	// Extracted from payload
+	ArbitrumAddress []byte
+	ArbitrumChainID uint16
+	Amount          uint64 // Added this field
 }
 
 // BlockInfo enhanced to include block hash and parent hash

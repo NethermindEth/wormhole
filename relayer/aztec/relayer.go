@@ -56,12 +56,12 @@ func NewConfigFromEnv() Config {
 	return Config{
 		SpyRPCHost:       getEnvOrDefault("SPY_RPC_HOST", "localhost:7072"),
 		SourceChainID:    uint16(getEnvIntOrDefault("SOURCE_CHAIN_ID", 52)),
-		DestChainID:      uint16(getEnvIntOrDefault("DEST_CHAIN_ID", 10003)),
+		DestChainID:      uint16(getEnvIntOrDefault("DEST_CHAIN_ID", 10004)),
 		DestRPCURL:       getEnvOrDefault("DEST_RPC_URL", "http://localhost:8545"),
 		PrivateKey:       getEnvOrDefault("PRIVATE_KEY", "0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"),
 		WormholeContract: getEnvOrDefault("WORMHOLE_CONTRACT", "0x1b35884f8ba9371419d00ae228da9ff839edfe8fe6a804fdfcd430e0dc7e40db"),
-		TargetContract:   getEnvOrDefault("TARGET_CONTRACT", "0x94dFeceb91678ec912ef8f14c72721c102ed2Df7"),
-		EmitterAddress:   getEnvOrDefault("EMITTER_ADDRESS", "3078303064333539363131626333323265623562343433393936366530663763"),
+		TargetContract:   getEnvOrDefault("TARGET_CONTRACT", "0x83EE15DFDDD8b8AD56A73001Ca7A1627c7fe6716"),
+		EmitterAddress:   getEnvOrDefault("EMITTER_ADDRESS", "036f76ac3a1fc0034310960df7f70bef7b7e10a647dbf870716b307f50aa9d28"),
 	}
 }
 
@@ -408,6 +408,60 @@ func defaultVAAProcessor(r *Relayer, vaaData *VAAData) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// Log detailed VAA information
+	r.logger.Info("VAA Details",
+		zap.Uint16("emitterChain", vaaData.ChainID),
+		zap.String("emitterAddress", vaaData.EmitterHex),
+		zap.Uint64("sequence", vaaData.Sequence),
+		zap.Time("timestamp", vaaData.VAA.Timestamp),
+		zap.Uint8("consistencyLevel", vaaData.VAA.ConsistencyLevel),
+		zap.Int("payloadLength", len(vaaData.VAA.Payload)))
+
+	// Log payload bytes in hex for better visibility
+	r.logger.Info("VAA Payload",
+		zap.String("payloadHex", fmt.Sprintf("%x", vaaData.VAA.Payload)))
+
+	// Log payload in 31-byte chunks (matching the Aztec log format)
+	const arraySize = 31
+	for i := 0; i < len(vaaData.VAA.Payload); i += arraySize {
+		end := i + arraySize
+		if end > len(vaaData.VAA.Payload) {
+			end = len(vaaData.VAA.Payload)
+		}
+
+		// Calculate array index
+		arrayIndex := i / arraySize
+
+		// Log the array
+		r.logger.Info(fmt.Sprintf("Payload array %d (bytes %d-%d)", arrayIndex, i, end-1),
+			zap.String("hex", fmt.Sprintf("0x%x", vaaData.VAA.Payload[i:end])))
+
+		// Array-specific field interpretations
+		if arrayIndex == 0 && i+20 <= end {
+			// First array: extract arbitrum address (first 20 bytes)
+			r.logger.Info("Array 0: Arbitrum address (first 20 bytes)",
+				zap.String("hex", fmt.Sprintf("0x%x", vaaData.VAA.Payload[i:i+20])))
+		}
+
+		if arrayIndex == 1 && i+2 <= end {
+			// Second array: extract chain ID (first 2 bytes)
+			chainIDLower := uint16(vaaData.VAA.Payload[i])
+			chainIDUpper := uint16(vaaData.VAA.Payload[i+1])
+			chainID := (chainIDUpper << 8) | chainIDLower
+			r.logger.Info("Array 1: Arbitrum chain ID (first 2 bytes)",
+				zap.Uint16("value", chainID),
+				zap.String("hex", fmt.Sprintf("0x%x", vaaData.VAA.Payload[i:i+2])))
+		}
+
+		if arrayIndex == 2 && i < end {
+			// Third array: extract amount (first byte)
+			amount := uint64(vaaData.VAA.Payload[i])
+			r.logger.Info("Array 2: First byte (amount)",
+				zap.Uint64("value", amount),
+				zap.String("hex", fmt.Sprintf("0x%x", vaaData.VAA.Payload[i:i+1])))
+		}
+	}
+
 	// Check if this is a VAA from the source chain
 	if vaaData.ChainID == r.config.SourceChainID {
 		r.logger.Info("Processing VAA from source chain",
@@ -431,7 +485,7 @@ func defaultVAAProcessor(r *Relayer, vaaData *VAAData) error {
 			return fmt.Errorf("transaction failed: %v", err)
 		}
 
-		r.logger.Info("Successfully sent verify transaction",
+		r.logger.Info("VAA verification completed successfully",
 			zap.Uint64("sequence", vaaData.Sequence),
 			zap.String("txHash", txHash))
 
