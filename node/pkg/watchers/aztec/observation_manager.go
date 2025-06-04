@@ -92,12 +92,15 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog, bloc
 		return fmt.Errorf("failed to parse log parameters: %v", err)
 	}
 
-	// Create message payload
-	rawPayload := w.createPayload(extLog.Log.Fields)
+	// Set the transaction ID from the block info
+	params.TxID = blockInfo.TxHash
+
+	// Create message payload (now including the txID)
+	rawPayload := w.createPayload(extLog.Log.Fields, params.TxID)
 
 	w.logDetailedPayload(extLog.Log.Fields, rawPayload)
 
-	// Extract structured data from the payload
+	// Extract structured data from the payload (accounting for txID at the beginning)
 	arbitrumAddress, arbitrumChainID, amount, _, err := w.extractPayloadData(rawPayload)
 	if err != nil {
 		w.logger.Warn("Failed to extract payload data", zap.Error(err))
@@ -120,6 +123,7 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog, bloc
 		zap.String("arbitrumAddress", fmt.Sprintf("0x%x", params.ArbitrumAddress)),
 		zap.Uint16("arbitrumChainID", params.ArbitrumChainID),
 		zap.Uint64("amount", params.Amount), // Add this line to log the amount
+		zap.String("txID", params.TxID),     // Add this line to log the txID
 		zap.Int("payloadLength", len(rawPayload)))
 
 	// Check for context cancellation before proceeding
@@ -140,41 +144,40 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog, bloc
 }
 
 // extractPayloadData parses the structured payload to extract key information
-// extractPayloadData parses the structured payload to extract key information
+// Modified to account for txID at the beginning of the payload
 func (w *Watcher) extractPayloadData(payload []byte) ([]byte, uint16, uint64, []byte, error) {
-	if len(payload) < 93 { // Need at least 3 full 31-byte arrays
-		return nil, 0, 0, nil, fmt.Errorf("payload too short, expected at least 93 bytes, got %d", len(payload))
+	// Skip past the txID (first 32 bytes)
+	txIDOffset := 32
+
+	if len(payload) < txIDOffset+93 { // Need txID + at least 3 full 31-byte arrays
+		return nil, 0, 0, nil, fmt.Errorf("payload too short, expected at least %d bytes, got %d", txIDOffset+93, len(payload))
 	}
+
+	// Extract the txID for logging
+	txID := payload[:txIDOffset]
+	w.logger.Debug("Extracted txID from payload", zap.String("txID", fmt.Sprintf("0x%x", txID)))
 
 	// Each array is 31 bytes long for address and chain ID
 	const arraySize = 31
 
-	// Extract Arbitrum address (first 20 bytes of first array)
+	// Extract Arbitrum address (first 20 bytes after txID)
 	arbitrumAddress := make([]byte, 20)
-	copy(arbitrumAddress, payload[:20])
+	copy(arbitrumAddress, payload[txIDOffset:txIDOffset+20])
 
-	// Extract Arbitrum chain ID (first 2 bytes of second array)
-	chainIDLower := uint16(payload[arraySize])
-	chainIDUpper := uint16(payload[arraySize+1])
+	// Extract Arbitrum chain ID (first 2 bytes of second array after txID)
+	chainIDLower := uint16(payload[txIDOffset+arraySize])
+	chainIDUpper := uint16(payload[txIDOffset+arraySize+1])
 	arbitrumChainID := (chainIDUpper << 8) | chainIDLower
 
-	// The amount is now a 32-byte value starting at position 2*arraySize
-	// Extract it as a full uint256
+	// The amount is the first byte of the third array after txID
 	amount := uint64(0)
-	if len(payload) >= 2*arraySize+32 { // Make sure we have 32 bytes for amount
-		// Read the full 32 bytes as a big-endian integer
-		// For simplicity, we'll just read the first 8 bytes (uint64)
-		// In a real implementation, you might need to handle the full uint256
-		for i := 0; i < 8 && i < 32; i++ {
-			pos := 2*arraySize + i
-			if pos < len(payload) {
-				amount = (amount << 8) | uint64(payload[pos])
-			}
-		}
+	if len(payload) >= txIDOffset+2*arraySize+1 {
+		// Just read the first byte as the amount value
+		amount = uint64(payload[txIDOffset+2*arraySize])
 	}
 
-	// The verification data now starts after the amount (which is 32 bytes)
-	verificationDataStart := 2*arraySize + 32
+	// The verification data starts after the amount array
+	verificationDataStart := txIDOffset + 3*arraySize
 	verificationDataLength := len(payload) - verificationDataStart
 	verificationData := make([]byte, verificationDataLength)
 
@@ -239,9 +242,26 @@ func (w *Watcher) parseLogParameters(logEntries []string) (LogParameters, error)
 }
 
 // createPayload processes log entries that contain field elements into a byte payload
-// createPayload processes log entries that contain field elements into a byte payload
-func (w *Watcher) createPayload(logEntries []string) []byte {
-	payload := make([]byte, 0, w.config.PayloadInitialCap)
+// Modified to include txID at the beginning of the payload
+func (w *Watcher) createPayload(logEntries []string, txID string) []byte {
+	// Start by adding the txID to the payload
+	txIDHex := strings.TrimPrefix(txID, "0x")
+	txIDBytes, err := hex.DecodeString(txIDHex)
+	if err != nil {
+		w.logger.Warn("Failed to decode txID hex, using empty txID", zap.Error(err))
+		txIDBytes = make([]byte, 0)
+	}
+
+	// Create a 32-byte array for txID
+	paddedTxID := make([]byte, 32)
+	// Copy txID bytes (this will handle padding correctly)
+	copy(paddedTxID, txIDBytes)
+
+	// Initialize payload with the txID
+	payload := paddedTxID
+
+	// Now continue with the rest of the payload
+	remainingPayload := make([]byte, 0, w.config.PayloadInitialCap)
 
 	// Skip the first 5 entries which are metadata (sender, sequence, nonce, consistency level, timestamp)
 	for i, entry := range logEntries[5:] {
@@ -270,13 +290,13 @@ func (w *Watcher) createPayload(logEntries []string) []byte {
 			// This is the amount field (third array)
 			// Ensure it's padded to 32 bytes
 			// First, add the current bytes
-			payload = append(payload, bytes...)
+			remainingPayload = append(remainingPayload, bytes...)
 
 			// Then add padding to make it 32 bytes total
 			// Don't include Jack after it - move Jack to the next 32-byte chunk
 			paddingNeeded := 32 - len(bytes)
 			padding := make([]byte, paddingNeeded)
-			payload = append(payload, padding...)
+			remainingPayload = append(remainingPayload, padding...)
 
 			// Continue to next entry - skip the normal append
 			continue
@@ -286,17 +306,20 @@ func (w *Watcher) createPayload(logEntries []string) []byte {
 		if i == 3 {
 			// This is where Jack would start
 			// Calculate padding needed to align to next 32-byte boundary
-			currentLength := len(payload)
+			currentLength := len(remainingPayload)
 			paddingNeeded := (32 - (currentLength % 32)) % 32
 			if paddingNeeded > 0 {
 				padding := make([]byte, paddingNeeded)
-				payload = append(payload, padding...)
+				remainingPayload = append(remainingPayload, padding...)
 			}
 		}
 
 		// Add to payload
-		payload = append(payload, bytes...)
+		remainingPayload = append(remainingPayload, bytes...)
 	}
+
+	// Combine txID and remainingPayload
+	payload = append(payload, remainingPayload...)
 
 	// Log the final payload length and hex representation
 	w.logger.Debug("Payload created",
@@ -321,28 +344,39 @@ func (w *Watcher) logDetailedPayload(logEntries []string, rawPayload []byte) {
 		zap.Int("length", len(rawPayload)),
 		zap.String("hexDump", hex.Dump(rawPayload)))
 
-	// Log address (first 20 bytes)
-	w.logger.Info("Arbitrum address (first 20 bytes)",
-		zap.String("hex", fmt.Sprintf("0x%x", rawPayload[:20])))
+	// Log the txID (first 32 bytes)
+	w.logger.Info("Transaction ID (first 32 bytes)",
+		zap.String("hex", fmt.Sprintf("0x%x", rawPayload[:32])))
 
-	// Log chain ID (bytes 31-32)
-	chainID := uint16(rawPayload[31]) | (uint16(rawPayload[32]) << 8)
-	w.logger.Info("Arbitrum chain ID (bytes 31-32)",
-		zap.Uint16("value", chainID),
-		zap.String("hex", fmt.Sprintf("0x%x", rawPayload[31:33])))
+	// Offset for remaining data (after txID)
+	txIDOffset := 32
 
-	// Log amount (bytes 62-93, 32 bytes)
-	if len(rawPayload) >= 94 {
-		w.logger.Info("Amount (bytes 62-93, 32 bytes)",
-			zap.String("hex", fmt.Sprintf("0x%x", rawPayload[62:94])))
+	// Log address (first 20 bytes after txID)
+	if len(rawPayload) >= txIDOffset+20 {
+		w.logger.Info("Arbitrum address (first 20 bytes after txID)",
+			zap.String("hex", fmt.Sprintf("0x%x", rawPayload[txIDOffset:txIDOffset+20])))
+	}
+
+	// Log chain ID (bytes 31-32 after txID)
+	if len(rawPayload) >= txIDOffset+32 {
+		chainID := uint16(rawPayload[txIDOffset+31]) | (uint16(rawPayload[txIDOffset+32]) << 8)
+		w.logger.Info("Arbitrum chain ID (bytes 31-32 after txID)",
+			zap.Uint16("value", chainID),
+			zap.String("hex", fmt.Sprintf("0x%x", rawPayload[txIDOffset+31:txIDOffset+33])))
+	}
+
+	// Log amount (bytes 62-93 after txID)
+	if len(rawPayload) >= txIDOffset+94 {
+		w.logger.Info("Amount (bytes 62-93 after txID)",
+			zap.String("hex", fmt.Sprintf("0x%x", rawPayload[txIDOffset+62:txIDOffset+94])))
 	}
 
 	// Log name and other fields
-	// The name would now start at byte 94
-	if len(rawPayload) >= 94 {
+	// The name would now start at byte 94 after txID
+	if len(rawPayload) >= txIDOffset+94 {
 		// Try to extract name
 		nameBytes := []byte{}
-		for i := 94; i < len(rawPayload); i++ {
+		for i := txIDOffset + 94; i < len(rawPayload); i++ {
 			if rawPayload[i] == 0 {
 				break
 			}

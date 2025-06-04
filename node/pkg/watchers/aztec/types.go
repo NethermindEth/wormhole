@@ -23,6 +23,7 @@ type LogParameters struct {
 	ArbitrumAddress []byte
 	ArbitrumChainID uint16
 	Amount          uint64 // Added this field
+	TxID            string
 }
 
 // BlockInfo enhanced to include block hash and parent hash
