@@ -60,8 +60,8 @@ func NewConfigFromEnv() Config {
 		DestRPCURL:       getEnvOrDefault("DEST_RPC_URL", "http://localhost:8545"),
 		PrivateKey:       getEnvOrDefault("PRIVATE_KEY", "0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"),
 		WormholeContract: getEnvOrDefault("WORMHOLE_CONTRACT", "0x1b35884f8ba9371419d00ae228da9ff839edfe8fe6a804fdfcd430e0dc7e40db"),
-		TargetContract:   getEnvOrDefault("TARGET_CONTRACT", "0x1886Fa412064137BDe9Ea996EA2bB85377de8aB6"),
-		EmitterAddress:   getEnvOrDefault("EMITTER_ADDRESS", "1750202881afaf3623cce3bec492598d4020e2df6abc8753b36e88aecdf4d7f4"),
+		TargetContract:   getEnvOrDefault("TARGET_CONTRACT", "0x25AF99b922857C37282f578F428CB7f34335B379"),
+		EmitterAddress:   getEnvOrDefault("EMITTER_ADDRESS", "2a7bfdc4f3200a117a8eb6610b93ce412430bfe05aefa5fce3ac9db392596566"),
 	}
 }
 
