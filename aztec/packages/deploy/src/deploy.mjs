@@ -3,8 +3,7 @@ import { getInitialTestAccountsWallets } from '@aztec/accounts/testing';
 import { Contract, createPXEClient, loadContractArtifact, waitForPXE } from '@aztec/aztec.js';
 import WormholeJson from "../../../contracts/target/wormhole_contracts-Wormhole.json" assert { type: "json" };
 import { TokenContract } from '@aztec/noir-contracts.js/Token'; 
-
-import { writeFileSync } from 'fs';
+import { writeFileSync, readFileSync } from 'fs';
 
 const WormholeJsonContractArtifact = loadContractArtifact(WormholeJson);
 
@@ -15,35 +14,6 @@ const { PXE_URL = 'http://localhost:8090' } = process.env;
 
 // Run first ``` aztec start --sandbox ```
 // then run this script with ``` node deploy.mjs ```
-
-
-// Following: https://docs.aztec.network/developers/tutorials/codealong/js_tutorials/aztecjs-getting-started#set-up-the-project
-async function deployToken(
-  adminWallet,
-  initialAdminBalance,
-) {
-  const contract = await TokenContract.deploy(
-    adminWallet,
-    adminWallet.getAddress(),
-    "WormholeToken",
-    "WORM",
-    18
-  )
-    .send()
-    .deployed();
-
-  if (initialAdminBalance > 0n) {
-    // Minter is minting to herself so contract as minter is the same as contract as recipient
-    await mintTokensToPublic(
-      contract,
-      adminWallet,
-      adminWallet.getAddress(),
-      initialAdminBalance
-    );
-  }
-
-  return contract;
-}
 
 async function mintTokensToPublic(
   token, // TokenContract
@@ -58,6 +28,20 @@ async function mintTokensToPublic(
     .wait();
 }
 
+async function mintTokensToPrivate(
+  token, // TokenContract
+  minterWallet, 
+  recipient,
+  amount
+) {
+  const tokenAsMinter = await TokenContract.at(token.address, minterWallet);
+  await tokenAsMinter.methods
+    .mint_to_private(minterWallet.getAddress(), recipient, amount)
+    .send()
+    .wait();
+}
+
+
 async function main() {
   const pxe = createPXEClient(PXE_URL);
   await waitForPXE(pxe);
@@ -70,8 +54,9 @@ async function main() {
   console.log(`Owner address: ${ownerAddress}`);
   console.log(`Receiver address: ${receiverWallet.getAddress()}`);
 
-  let token = await deployToken(ownerWallet, 1000n);
-  console.log(`Deployed token contract at ${token.address}`)
+  let token_address = JSON.parse(readFileSync("token_address.json", 'utf8'));
+
+  const token = await TokenContract.at(token_address.token_address, ownerWallet);
 
   // Test parameters 
   let wormhole_init_params = [
@@ -118,30 +103,71 @@ async function main() {
   console.log(`Calling publish_message with message "${message}" on wormhole contract...`);
   console.log(`Payload: ${payload}`);
 
-  // action to be taken using authwit
-  const tokenTransferAction = token.methods.transfer_in_public(
+  console.log(`Minting tokens to public...`);
+  await mintTokensToPublic(
+    token,
+    ownerWallet,
     ownerAddress,
-    receiverWallet.getAddress(),
-    2n,
-    0n
-  );  
-  // generate authwit to allow for wormhole to send funds to itself on behalf of owner
-  const validateActionInteraction = await ownerWallet.setPublicAuthWit(
-    {
-      caller: wormhole.address,
-      action: tokenTransferAction
-    },
-    true
+    10000n
   );
 
-  await validateActionInteraction.send().wait();
+  const msg_fee = 3n;
+  const nonce = 0n
+  const publish_private = true; // Set to true to publish in private, false for public
 
-  const _tx = await contract.methods.publish_message(100, payload, 2n,2, ownerAddress, 0n).send().wait();
+  if (publish_private) {
+    console.log(`Performing payment in private...`);
 
-  let receiver_balance = await token.methods.balance_of_public(receiverWallet.getAddress()).simulate();
+    console.log(`Minting tokens to private for owner...`);
+    await mintTokensToPrivate(
+      token,
+      ownerWallet,
+      ownerAddress,
+      10000n
+    );
 
-  if (receiver_balance != 2) {
-    throw new Error(`Incorrect receiver balance ${receiver_balance}`);
+    const privateAction = token.methods.transfer_in_private(
+      ownerAddress,
+      receiverWallet.getAddress(),
+      msg_fee,
+      nonce
+    );
+    console.log(`${ownerAddress} is transferring ${msg_fee} tokens to ${receiverWallet.getAddress()} in private`);
+
+    const initWitness = await ownerWallet.createAuthWit({ 
+      caller: wormhole.address, 
+      action: privateAction 
+    });
+
+    console.log(`Generated private authwit`);
+
+    const _tx = await contract.methods.publish_message_in_private(100, payload, msg_fee, 2, ownerAddress, nonce).send({ authWitnesses: [initWitness] }).wait();
+    console.log(_tx);
+  } else {
+    console.log(`Publishing message in public...`);
+
+    // action to be taken using authwit
+    const tokenTransferAction = token.methods.transfer_in_public(
+      ownerAddress,
+      receiverWallet.getAddress(),
+      msg_fee,
+      nonce
+    );  
+    // generate authwit to allow for wormhole to send funds to itself on behalf of owner
+    const validateActionInteraction = await ownerWallet.setPublicAuthWit(
+      {
+        caller: wormhole.address,
+        action: tokenTransferAction
+      },
+      true
+    );
+
+    await validateActionInteraction.send().wait();
+
+    console.log(`Generated public authwit`);
+    
+    const _tx = await contract.methods.publish_message_in_public(100, payload, msg_fee,2, ownerAddress, nonce).send().wait();
+    console.log(_tx);
   }
 
   const sampleLogFilter = {
@@ -149,8 +175,6 @@ async function main() {
     toBlock: 190,
     contractAddress: '0x081a143b80470311c64f8fd1b67a074e2aa312bf5e22e6ebe0b17c5b3b44470b'
   };
-
-  console.log(_tx);
 
   const logs = await pxe.getPublicLogs(sampleLogFilter);
 
