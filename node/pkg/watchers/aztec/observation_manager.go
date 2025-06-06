@@ -68,7 +68,7 @@ func NewObservationManager(networkID string, logger *zap.Logger) ObservationMana
 // IncrementMessagesConfirmed increases the counter for confirmed messages
 func (m *observationManager) IncrementMessagesConfirmed() {
 	m.metrics.messagesConfirmed.WithLabelValues(m.networkID).Inc()
-	m.logger.Info("Incremented messages confirmed counter")
+	m.logger.Debug("Incremented messages confirmed counter")
 }
 
 // processLog handles an individual log entry
@@ -98,18 +98,20 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog, bloc
 	// Create message payload (now including the txID)
 	rawPayload := w.createPayload(extLog.Log.Fields, params.TxID)
 
-	w.logDetailedPayload(extLog.Log.Fields, rawPayload)
+	w.logger.Debug("Created payload",
+		zap.Int("payloadLength", len(rawPayload)),
+		zap.String("txID", params.TxID))
 
 	// Extract structured data from the payload (accounting for txID at the beginning)
 	arbitrumAddress, arbitrumChainID, amount, _, err := w.extractPayloadData(rawPayload)
 	if err != nil {
-		w.logger.Warn("Failed to extract payload data", zap.Error(err))
+		w.logger.Debug("Failed to extract payload data", zap.Error(err))
 		// Continue with empty values for these fields
 	} else {
 		// Add the extracted values to the parameters
 		params.ArbitrumAddress = arbitrumAddress
 		params.ArbitrumChainID = arbitrumChainID
-		params.Amount = amount // Add the amount to the parameters
+		params.Amount = amount
 	}
 
 	// Create a unique ID for this observation
@@ -119,12 +121,9 @@ func (w *Watcher) processLog(ctx context.Context, extLog ExtendedPublicLog, bloc
 	w.logger.Info("Processing message",
 		zap.Stringer("emitter", params.SenderAddress),
 		zap.Uint64("sequence", params.Sequence),
-		zap.Uint8("consistencyLevel", params.ConsistencyLevel),
 		zap.String("arbitrumAddress", fmt.Sprintf("0x%x", params.ArbitrumAddress)),
 		zap.Uint16("arbitrumChainID", params.ArbitrumChainID),
-		zap.Uint64("amount", params.Amount), // Add this line to log the amount
-		zap.String("txID", params.TxID),     // Add this line to log the txID
-		zap.Int("payloadLength", len(rawPayload)))
+		zap.Uint64("amount", params.Amount))
 
 	// Check for context cancellation before proceeding
 	select {
@@ -153,7 +152,7 @@ func (w *Watcher) extractPayloadData(payload []byte) ([]byte, uint16, uint64, []
 		return nil, 0, 0, nil, fmt.Errorf("payload too short, expected at least %d bytes, got %d", txIDOffset+93, len(payload))
 	}
 
-	// Extract the txID for logging
+	// Extract the txID for debugging
 	txID := payload[:txIDOffset]
 	w.logger.Debug("Extracted txID from payload", zap.String("txID", fmt.Sprintf("0x%x", txID)))
 
@@ -185,8 +184,8 @@ func (w *Watcher) extractPayloadData(payload []byte) ([]byte, uint16, uint64, []
 		copy(verificationData, payload[verificationDataStart:])
 	}
 
-	// Log what we've extracted
-	w.logger.Info("Extracted payload data",
+	// Log what we've extracted at debug level
+	w.logger.Debug("Extracted payload data",
 		zap.String("arbitrumAddress", fmt.Sprintf("0x%x", arbitrumAddress)),
 		zap.Uint16("arbitrumChainID", arbitrumChainID),
 		zap.Uint64("amount", amount),
@@ -248,7 +247,7 @@ func (w *Watcher) createPayload(logEntries []string, txID string) []byte {
 	txIDHex := strings.TrimPrefix(txID, "0x")
 	txIDBytes, err := hex.DecodeString(txIDHex)
 	if err != nil {
-		w.logger.Warn("Failed to decode txID hex, using empty txID", zap.Error(err))
+		w.logger.Debug("Failed to decode txID hex, using empty txID", zap.Error(err))
 		txIDBytes = make([]byte, 0)
 	}
 
@@ -271,7 +270,7 @@ func (w *Watcher) createPayload(logEntries []string, txID string) []byte {
 		// Try to decode as hex
 		bytes, err := hex.DecodeString(entry)
 		if err != nil {
-			w.logger.Debug("Failed to decode hex", zap.Error(err))
+			w.logger.Debug("Failed to decode hex entry", zap.Error(err), zap.Int("entryIndex", i+5))
 			continue
 		}
 
@@ -321,73 +320,11 @@ func (w *Watcher) createPayload(logEntries []string, txID string) []byte {
 	// Combine txID and remainingPayload
 	payload = append(payload, remainingPayload...)
 
-	// Log the final payload length and hex representation
+	// Log the final payload length at debug level
 	w.logger.Debug("Payload created",
-		zap.Int("length", len(payload)),
-		zap.String("hex", hex.EncodeToString(payload)))
+		zap.Int("length", len(payload)))
 
 	return payload
-}
-
-func (w *Watcher) logDetailedPayload(logEntries []string, rawPayload []byte) {
-	// Log the raw log entries first
-	w.logger.Info("Raw log entries received",
-		zap.Int("entryCount", len(logEntries)))
-
-	for i, entry := range logEntries {
-		w.logger.Info(fmt.Sprintf("Log entry %d", i),
-			zap.String("raw", entry))
-	}
-
-	// Log the raw payload bytes
-	w.logger.Info("Raw payload bytes",
-		zap.Int("length", len(rawPayload)),
-		zap.String("hexDump", hex.Dump(rawPayload)))
-
-	// Log the txID (first 32 bytes)
-	w.logger.Info("Transaction ID (first 32 bytes)",
-		zap.String("hex", fmt.Sprintf("0x%x", rawPayload[:32])))
-
-	// Offset for remaining data (after txID)
-	txIDOffset := 32
-
-	// Log address (first 20 bytes after txID)
-	if len(rawPayload) >= txIDOffset+20 {
-		w.logger.Info("Arbitrum address (first 20 bytes after txID)",
-			zap.String("hex", fmt.Sprintf("0x%x", rawPayload[txIDOffset:txIDOffset+20])))
-	}
-
-	// Log chain ID (bytes 31-32 after txID)
-	if len(rawPayload) >= txIDOffset+32 {
-		chainID := uint16(rawPayload[txIDOffset+31]) | (uint16(rawPayload[txIDOffset+32]) << 8)
-		w.logger.Info("Arbitrum chain ID (bytes 31-32 after txID)",
-			zap.Uint16("value", chainID),
-			zap.String("hex", fmt.Sprintf("0x%x", rawPayload[txIDOffset+31:txIDOffset+33])))
-	}
-
-	// Log amount (bytes 62-93 after txID)
-	if len(rawPayload) >= txIDOffset+94 {
-		w.logger.Info("Amount (bytes 62-93 after txID)",
-			zap.String("hex", fmt.Sprintf("0x%x", rawPayload[txIDOffset+62:txIDOffset+94])))
-	}
-
-	// Log name and other fields
-	// The name would now start at byte 94 after txID
-	if len(rawPayload) >= txIDOffset+94 {
-		// Try to extract name
-		nameBytes := []byte{}
-		for i := txIDOffset + 94; i < len(rawPayload); i++ {
-			if rawPayload[i] == 0 {
-				break
-			}
-			nameBytes = append(nameBytes, rawPayload[i])
-		}
-		if len(nameBytes) > 0 {
-			w.logger.Info("Name",
-				zap.String("value", string(nameBytes)),
-				zap.String("hex", fmt.Sprintf("0x%x", nameBytes)))
-		}
-	}
 }
 
 // ParseHexUint64 converts a hex string to uint64
