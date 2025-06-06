@@ -199,7 +199,7 @@ pub contract Wormhole {
             inner: 0x1f41267c06dae96c9c3906c5f77cbc28602cc70d6d7e9d2c3072cb0a5b13edd2 // TODO: change this each time
         };
         let token_address = AztecAddress {
-            inner: 0x136b0fec0c458e3bec8a5a7fdfbf7643365cc861a95137e6dcf54ca828f04494 // TODO: change this each time
+            inner: 0x15edee5716556b6d29a9893c9d6872117709a7bf23fb82a72ef6bf7de1de9da0 // TODO: change this each time
         };
 
         // deposit the message fee to wormhole token contract

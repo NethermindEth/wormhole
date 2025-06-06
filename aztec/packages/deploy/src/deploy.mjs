@@ -7,7 +7,7 @@ import { writeFileSync, readFileSync } from 'fs';
 
 const WormholeJsonContractArtifact = loadContractArtifact(WormholeJson);
 
-const { PXE_URL = 'http://localhost:8080' } = process.env;
+const { PXE_URL = 'http://localhost:8090' } = process.env;
 
 // Call `aztec-nargo compile` to compile the contract
 // Call `aztec codegen ./src -o src/artifacts/` to generate the contract artifacts
