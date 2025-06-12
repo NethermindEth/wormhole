@@ -78,6 +78,8 @@ impl Guardian_PK {
 #[test]
 fn test_should_create_guardian_pk() {
     let g = Guardian_PK::new([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]);
+    let value0 = g.value0;
+    println(f"g.value0: {value0}");
     assert_eq(g.value0, 1);
     assert_eq(g.value1, 2);
     assert_eq(g.value2, 3);
@@ -571,6 +573,9 @@ impl VAA {
             [hash1[0], hash1[1], hash1[2], hash1[3], hash1[4], hash1[5], hash1[6], hash1[7], hash1[8], hash1[9], hash1[10], hash1[11], hash1[12], hash1[13], hash1[14], hash1[15], hash1[16], hash1[17], hash1[18], hash1[19], hash1[20], hash1[21], hash1[22], hash1[23], hash1[24], hash1[25], hash1[26], hash1[27], hash1[28], hash1[29], hash1[30], hash1[31]],
             32
         );
+        println(f"version: {version}");
+        // println(f"timestamp: {body.timestamp}");
+        // println(f"nonce: {body.nonce}");
             
         VAA::new(
             version,
@@ -588,32 +593,39 @@ impl VAA {
     }
 
     // TODO - verify VAA signatures
-    // fn verify(vaa: Self, guardian_set: GuardianSet) {
-        // // CALLED FROM STATE so must check that gs is active otherwise throw error
-        // let guardians: [Guardian; 19] = guardian_set.get_guardians();
-        // let hash: [u8; 32] = vaa.hash;
+    pub fn verify(vaa: Self) -> bool {
+        // get guardian public keys from contract storage
+        // let public_keys = get_contract_storage();
+        // CALLED FROM STATE so must check that gs is active otherwise throw error
+        let hash: [u8; 32] = vaa.hash;
 
-        // let mut last_idx = 0;
+        let mut valid = false;
 
-        // let signatures: [Signature; 13] = vaa.signatures;
+        let signatures: [Signature; 13] = vaa.signatures;
 
-        // // verify each signature
-        // for i in 0..13 {
-        //     let sig_r = signatures[i].r;
-        //     let sig_s = signatures[i].s;
-        //     let recovery_id = signatures[i].v;
-        //     let guardian_idx = signatures[i].guardian_index;
+        // verify each signature
+        for i in 0..13 {
+            let sig_r = signatures[i].r;
+            let sig_s = signatures[i].s;
+            let recovery_id = signatures[i].v;
+            let guardian_idx = signatures[i].guardian_index;
+            let valid_signature = std::ecdsa_secp256k1::verify_signature(pub_key_x, pub_key_y, signature, hash);
+     assert(valid_signature);
 
-        //     assert(guardian_idx > last_idx, "guardian index is not increasing");
-        //     last_idx = guardian_idx;
+            valid = valid_signature; 
+        }
+        valid 
+    }
+    pub fn verify_signatures(vaa: Self, guardian_set: [Guardian; 19]) -> bool {
+        // This function should verify the signatures of the VAA against the guardian set.
+        // For now, we will return true as a placeholder.
+        true
+    }
+}
 
-
-
-            // let guardian: Guardian = guardians[guardian_idx as usize];
-            // let guardian_address: [u8; 20] = guardian.get_address();
-
-            // TODO: check signature in guardian matches guardian pk generated from message + recovery id + signature
-        // }
+#[test]
+fn test_vaa_verify() {
+    let v = Guardian::default();
 }
 
 pub fn u32_from_u8s_le(bytes: [u8; 4]) -> u32 {
