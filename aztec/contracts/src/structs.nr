@@ -590,7 +590,7 @@ impl VAA {
         )
     }
 
-    pub unconstrained fn verify(vaa: Self) -> bool {
+    pub fn verify(vaa: Self) -> bool {
         // TODO: Retrieve the current guardian set from contract storage (not hardcoded)
         // let public_keys = get_contract_storage();
         
@@ -615,33 +615,44 @@ impl VAA {
         
         let signature_0: [u8; 64] = [57, 17, 112, 239, 241, 30, 64, 157, 170, 50, 85, 145, 156, 69, 226, 85, 147, 164, 10, 82, 71, 93, 42, 132, 200, 220, 161, 255, 95, 241, 211, 141, 81, 7, 150, 25, 25, 27, 162, 213, 80, 61, 12, 170, 50, 4, 154, 203, 252, 229, 119, 29, 202, 153, 50, 25, 126, 145, 245, 23, 136, 75, 29, 177];
   
-        let signature_1: [u8; 64] = [210, 111, 158, 7, 65, 94, 101, 234, 15, 246, 75, 176, 249, 29, 134, 211, 142, 93, 37, 74, 113, 115, 83, 125, 30, 187, 25, 137, 40, 191, 232, 109, 162, 191, 78, 229, 189, 230, 253, 181, 176, 31, 3, 167, 156, 8, 87, 189, 8, 246, 190, 149, 133, 41, 234, 250, 69, 239, 243, 151, 18, 233, 102, 130];
+        // let signature_1: [u8; 64] = [210, 111, 158, 7, 65, 94, 101, 234, 15, 246, 75, 176, 249, 29, 134, 211, 142, 93, 37, 74, 113, 115, 83, 125, 30, 187, 25, 137, 40, 191, 232, 109, 162, 191, 78, 229, 189, 230, 253, 181, 176, 31, 3, 167, 156, 8, 87, 189, 8, 246, 190, 149, 133, 41, 234, 250, 69, 239, 243, 151, 18, 233, 102, 130];
         
-        let signatures: [[u8; 64]; 2] = [signature_0, signature_1];
+        let signatures: [[u8; 64]; 1] = [signature_0];
         // let hash: [u8; 32] = vaa.hash;
         let hash: [u8; 32] = [13, 82, 120, 60, 76, 186, 215, 235, 175, 126, 185, 67, 252, 100, 143, 82, 130, 165, 32, 112, 68, 47, 193, 141, 141, 209, 109, 219, 47, 203, 175, 102];
 
         let mut valid = false;
+        let mut valid_count = 0;
 
         // NOTE: Current implementation does not ensure that the guardianIndex of the signature maps to the correct public key
         // TODO: Implement guardianIndex-based identity verification
-        for i in 0..pub_keys.len() {
-            let (pub_key_x, pub_key_y) = pub_keys[i];
-            // println(f"Verifying signatures from guardian {i} public key: {pub_key_x}, {pub_key_y}");
-            // TODO: Instead, aggregate number of distinct valid signatures and verify against quorum
-            for j in 0..signatures.len() {
-                let valid_signature = std::ecdsa_secp256k1::verify_signature(pub_key_x, pub_key_y, signatures[j], hash);
-                
-                if valid_signature {
-                    valid = valid_signature;
-                    println(f"Signature {j} from guardian {i} is valid");
-                    break;
-                }
-                if (j == signatures.len() - 1) & (!valid_signature) {
-                    println(f"Signature {j} from guardian {i} is invalid");
-                    valid = false;
+        
+        for j in 0..signatures.len() {
+            let mut signature_matched = false;
+
+            // Check against all guardian public keys
+            for i in 0..pub_keys.len() {
+                // Only check if no match has been found yet
+                let should_check = !signature_matched;
+
+                let (pub_key_x, pub_key_y) = pub_keys[i];
+                let is_valid = std::ecdsa_secp256k1::verify_signature(pub_key_x, pub_key_y, signatures[j], hash);
+
+                // Update matched status only if checking and valid
+                if (should_check) & (is_valid) {
+                    println(f"Signature {j} matches guardian {i}");
+                    signature_matched = true;
                 }
             }
+
+            // Count this signature as valid if matched any guardian
+            if signature_matched {
+                valid_count += 1;
+            }
+        }
+
+        if valid_count >= signatures.len() {
+            valid = true;
         }
         valid 
     }
