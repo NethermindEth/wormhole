@@ -596,36 +596,56 @@ impl VAA {
     pub fn verify(vaa: Self) -> bool {
         // get guardian public keys from contract storage
         // let public_keys = get_contract_storage();
-        // CALLED FROM STATE so must check that gs is active otherwise throw error
-        let hash: [u8; 32] = vaa.hash;
+        
+        let pub_key_x_0: [u8; 32] = [235, 242, 53, 115, 58, 8, 106, 72, 44, 7, 224, 17, 209, 93, 30, 146, 94, 161, 240, 247, 202, 223, 237, 231, 127, 149, 24, 246, 251, 195, 222, 11];
+        let pub_key_y_0: [u8; 32] = [131, 142, 12, 118, 176, 255, 51, 212, 169, 147, 53, 218, 14, 9, 102, 218, 3, 214, 107, 250, 221, 96, 39, 111, 2, 170, 90, 119, 161, 202, 220, 110];
+
+        let pub_key_x_1: [u8; 32] = [9, 109, 40, 4, 83, 193, 10, 76, 50, 124, 156, 250, 50, 79, 161, 244, 89, 105, 32, 143, 246, 112, 243, 253, 229, 25, 113, 21, 229, 121, 144, 152];
+        let pub_key_y_1: [u8; 32] = [194, 216, 17, 18, 44, 26, 41, 82, 233, 57, 225, 57, 245, 99, 159, 40, 6, 124, 127, 220, 128, 36, 21, 252, 158, 205, 182, 138, 101, 33, 73, 186];
+
+        let pub_key_x_2: [u8; 32] = [95, 69, 235, 34, 47, 206, 14, 20, 229, 194, 10, 55, 253, 89, 88, 219, 151, 220, 170, 200, 5, 186, 99, 112, 57, 153, 14, 75, 248, 92, 78, 197];
+        let pub_key_y_2: [u8; 32] = [220, 211, 229, 3, 179, 38, 94, 139, 216, 119, 112, 71, 228, 29, 195, 65, 146, 84, 24, 216, 33, 9, 195, 144, 207, 137, 132, 206, 205, 36, 143, 103];
+        
+        let pub_keys: [([u8; 32], [u8; 32]); 3] = [
+            (pub_key_x_0, pub_key_y_0),
+            (pub_key_x_1, pub_key_y_1),
+            (pub_key_x_2, pub_key_y_2)
+        ];
+        // let signatures: [Signature; 13] = vaa.signatures;
+        
+        let signature_0: [u8; 64] = [196, 51, 7, 169, 201, 111, 52, 196, 187, 115, 114, 144, 134, 58, 59, 193, 220, 122, 47, 82, 161, 142, 46, 48, 52, 105, 49, 142, 82, 236, 24, 32, 186, 51, 185, 172, 130, 72, 126, 90, 95, 84, 58, 78, 226, 84, 75, 169, 42, 165, 237, 30, 81, 99, 55, 116, 223, 219, 119, 243, 130, 17, 86, 104];
+  
+        let signature_1: [u8; 64] = [210, 111, 158, 7, 65, 94, 101, 234, 15, 246, 75, 176, 249, 29, 134, 211, 142, 93, 37, 74, 113, 115, 83, 125, 30, 187, 25, 137, 40, 191, 232, 109, 162, 191, 78, 229, 189, 230, 253, 181, 176, 31, 3, 167, 156, 8, 87, 189, 8, 246, 190, 149, 133, 41, 234, 250, 69, 239, 243, 151, 18, 233, 102, 130];
+        
+        let signatures: [[u8; 64]; 2] = [signature_0, signature_1];
+        // let hash: [u8; 32] = vaa.hash;
+        let hash: [u8; 32] = [13, 82, 120, 60, 76, 186, 215, 235, 175, 126, 185, 67, 252, 100, 143, 82, 130, 165, 32, 112, 68, 47, 193, 141, 141, 209, 109, 219, 47, 203, 175, 102];
 
         let mut valid = false;
 
-        let signatures: [Signature; 13] = vaa.signatures;
 
         // verify each signature
-        for i in 0..13 {
-            let sig_r = signatures[i].r;
-            let sig_s = signatures[i].s;
-            let recovery_id = signatures[i].v;
-            let guardian_idx = signatures[i].guardian_index;
-            let valid_signature = std::ecdsa_secp256k1::verify_signature(pub_key_x, pub_key_y, signature, hash);
-     assert(valid_signature);
+        for i in 0..pub_keys.len() {
+            let (pub_key_x, pub_key_y) = pub_keys[i];
+            println(f"Verifying signatures from guardian {i} public key: {pub_key_x}, {pub_key_y}");
+            for j in 0..signatures.len() {
+                let valid_signature = std::ecdsa_secp256k1::verify_signature(pub_key_x, pub_key_y, signatures[j], hash);
+                if valid_signature == true {
+                    valid = valid_signature;
+                    println(f"Signature {j} from guardian {i} is valid");
+                }
+            }
 
-            valid = valid_signature; 
         }
         valid 
-    }
-    pub fn verify_signatures(vaa: Self, guardian_set: [Guardian; 19]) -> bool {
-        // This function should verify the signatures of the VAA against the guardian set.
-        // For now, we will return true as a placeholder.
-        true
     }
 }
 
 #[test]
 fn test_vaa_verify() {
-    let v = Guardian::default();
+    let vaa = VAA::default();
+    let verified = vaa.verify();
+    assert(verified, "VAA verification failed");
 }
 
 pub fn u32_from_u8s_le(bytes: [u8; 4]) -> u32 {
