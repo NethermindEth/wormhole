@@ -78,8 +78,6 @@ impl Guardian_PK {
 #[test]
 fn test_should_create_guardian_pk() {
     let g = Guardian_PK::new([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]);
-    let value0 = g.value0;
-    println(f"g.value0: {value0}");
     assert_eq(g.value0, 1);
     assert_eq(g.value1, 2);
     assert_eq(g.value2, 3);
@@ -592,9 +590,8 @@ impl VAA {
         )
     }
 
-    // TODO - verify VAA signatures
-    pub fn verify(vaa: Self) -> bool {
-        // get guardian public keys from contract storage
+    pub unconstrained fn verify(vaa: Self) -> bool {
+        // TODO: Retrieve the current guardian set from contract storage (not hardcoded)
         // let public_keys = get_contract_storage();
         
         let pub_key_x_0: [u8; 32] = [131, 24, 83, 91, 84, 16, 93, 74, 122, 174, 96, 192, 143, 196, 95, 150, 135, 24, 27, 79, 223, 198, 37, 189, 26, 117, 63, 167, 57, 127, 237, 117];
@@ -611,6 +608,9 @@ impl VAA {
             (pub_key_x_1, pub_key_y_1),
             (pub_key_x_2, pub_key_y_2)
         ];
+        // TODO: Implement a quorum check: count number of valid signatures, compare with quorum(guardianSetSize)
+        // TODO: Check that guardianSetIndex from VAA is valid and not expired
+
         // let signatures: [Signature; 13] = vaa.signatures;
         
         let signature_0: [u8; 64] = [57, 17, 112, 239, 241, 30, 64, 157, 170, 50, 85, 145, 156, 69, 226, 85, 147, 164, 10, 82, 71, 93, 42, 132, 200, 220, 161, 255, 95, 241, 211, 141, 81, 7, 150, 25, 25, 27, 162, 213, 80, 61, 12, 170, 50, 4, 154, 203, 252, 229, 119, 29, 202, 153, 50, 25, 126, 145, 245, 23, 136, 75, 29, 177];
@@ -623,19 +623,25 @@ impl VAA {
 
         let mut valid = false;
 
-
-        // verify each signature
+        // NOTE: Current implementation does not ensure that the guardianIndex of the signature maps to the correct public key
+        // TODO: Implement guardianIndex-based identity verification
         for i in 0..pub_keys.len() {
             let (pub_key_x, pub_key_y) = pub_keys[i];
-            println(f"Verifying signatures from guardian {i} public key: {pub_key_x}, {pub_key_y}");
+            // println(f"Verifying signatures from guardian {i} public key: {pub_key_x}, {pub_key_y}");
+            // TODO: Instead, aggregate number of distinct valid signatures and verify against quorum
             for j in 0..signatures.len() {
                 let valid_signature = std::ecdsa_secp256k1::verify_signature(pub_key_x, pub_key_y, signatures[j], hash);
-                if valid_signature == true {
+                
+                if valid_signature {
                     valid = valid_signature;
                     println(f"Signature {j} from guardian {i} is valid");
+                    break;
+                }
+                if (j == signatures.len() - 1) & (!valid_signature) {
+                    println(f"Signature {j} from guardian {i} is invalid");
+                    valid = false;
                 }
             }
-
         }
         valid 
     }
