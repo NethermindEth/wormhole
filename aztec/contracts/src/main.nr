@@ -108,6 +108,12 @@ pub contract Wormhole {
         guardian_11: Map<u32, PublicMutable<Guardian, Context>, Context>,
         guardian_12: Map<u32, PublicMutable<Guardian, Context>, Context>,
         guardian_13: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_14: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_15: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_16: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_17: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_18: Map<u32, PublicMutable<Guardian, Context>, Context>,
+        guardian_19: Map<u32, PublicMutable<Guardian, Context>, Context>,
         current_guardian_set_index: Map<u32, PublicMutable<u64, Context>, Context>, // map index to expiration time
     }
 
@@ -353,6 +359,36 @@ pub contract Wormhole {
         index: u32,
     ){ 
         storage.guardian_13.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian14(guardian: Guardian, index: u32) { 
+        storage.guardian_14.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian15(guardian: Guardian, index: u32) { 
+        storage.guardian_15.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian16(guardian: Guardian, index: u32) { 
+        storage.guardian_16.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian17(guardian: Guardian, index: u32) { 
+        storage.guardian_17.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian18(guardian: Guardian, index: u32) { 
+        storage.guardian_18.at(index).write(guardian);
+    }
+
+    #[public]
+    fn set_guardian19(guardian: Guardian, index: u32) { 
+        storage.guardian_19.at(index).write(guardian);
     }
 
     #[public]
