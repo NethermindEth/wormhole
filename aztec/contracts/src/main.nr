@@ -3,7 +3,66 @@ mod structs;
 
 /**
 To deploy on testnet, use the following commands (following the tutorial):
-... (your deployment instructions)
+1. Set the environment variable for the node URL:
+export NODE_URL=https://aztec-alpha-testnet-fullnode.zkv.xyz
+export SPONSORED_FPC_ADDRESS=0x1260a43ecf03e985727affbbe3e483e60b836ea821b6305bea1c53398b986047
+2. Create a new wallets:
+2a. Create a new wallet for the owner:
+aztec-wallet create-account \
+    --register-only \
+    --node-url $NODE_URL \
+    --alias owner-wallet
+2b. Create a new wallet for the receiver:
+aztec-wallet create-account \
+    --register-only \
+    --node-url $NODE_URL \
+    --alias receiver-wallet
+3. Register owner account with FPC:
+3a. Register the owner wallet with the FPC:
+aztec-wallet register-contract \
+    --node-url $NODE_URL \
+    --from owner-wallet \
+    --alias sponsoredfpc \
+    $SPONSORED_FPC_ADDRESS SponsoredFPC \
+    --salt 0
+3b. Register the receiver wallet with the FPC:
+aztec-wallet register-contract \
+    --node-url $NODE_URL \
+    --from receiver-wallet \
+    --alias sponsoredfpc \
+    $SPONSORED_FPC_ADDRESS SponsoredFPC \
+    --salt 0
+4. Deploy accounts (may get error `Timeout awaiting isMined` but that is fine continue with the next step):
+4a. Deploy the owner wallet:
+aztec-wallet deploy-account \
+    --node-url $NODE_URL \
+    --from owner-wallet \
+    --payment method=fpc-sponsored,fpc=contracts:sponsoredfpc \
+    --register-class
+4b. Deploy the receiver wallet:
+aztec-wallet deploy-account \
+    --node-url $NODE_URL \
+    --from receiver-wallet \
+    --payment method=fpc-sponsored,fpc=contracts:sponsoredfpc \
+    --register-class
+5. Deploy the Token contract (wait for it to be mined on testnet check txhash at http://aztecscan.xyz/):
+aztec-wallet deploy \
+    --node-url $NODE_URL \
+    --from accounts:owner-wallet \
+    --payment method=fpc-sponsored,fpc=contracts:sponsoredfpc \
+    --alias token \
+    TokenContract \
+    --args accounts:owner-wallet WormToken WORM 18 --no-wait
+6. Mint tokens to public & private now to call the upcoming functions:
+6a. Mint public tokens:
+7. Deploy the Wormhole contract (wait for it to be mined on testnet check txhash at http://aztecscan.xyz/):
+aztec-wallet deploy \
+    --node-url $NODE_URL \
+    --from accounts:owner-wallet \
+    --payment method=fpc-sponsored,fpc=contracts:sponsoredfpc \
+    --alias wormhole \
+    Wormhole \
+    --args 13 13 *receiver address* *token contract address* --no-wait
 */
 
 #[aztec]
