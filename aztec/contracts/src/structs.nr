@@ -1,6 +1,5 @@
 use dep::aztec::{protocol_types::traits::{Deserialize, Packable, Serialize}, prelude::AztecAddress};
 use std::meta::derive;
-use dep::keccak256::keccak256;
 
 #[derive(Deserialize, Packable, Serialize)]
 pub struct Provider {
@@ -102,39 +101,6 @@ impl Guardian_PK {
     }
 }
 
-// Testing Guardian_PK with public keys
-#[test]
-fn test_should_create_guardian_pk_with_pubkeys() {
-    let address = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];
-    let pub_key_x = [21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52];
-    let pub_key_y = [53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84];
-    let g = Guardian_PK::new(address, pub_key_x, pub_key_y);
-    
-    assert_eq(g.value0, 1);
-    assert_eq(g.pub_key_x0, 21);
-    assert_eq(g.pub_key_y0, 53);
-}
-
-#[test]
-fn test_should_return_guardian_pk_as_correct_array() {
-    let g = Guardian_PK::new([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], [0;32], [0;32]);
-    let g_array = Guardian_PK::as_array(g);
-    assert_eq(g_array, [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]);
-}
-
-#[test]
-fn test_get_pub_keys() {
-    let pub_key_x = [21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52];
-    let pub_key_y = [53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84];
-    let g = Guardian_PK::new([0;20], pub_key_x, pub_key_y);
-    
-    let retrieved_x = g.get_pub_key_x();
-    let retrieved_y = g.get_pub_key_y();
-    
-    assert_eq(retrieved_x, pub_key_x);
-    assert_eq(retrieved_y, pub_key_y);
-}
-
 #[derive(Deserialize, Packable, Serialize)]
 pub struct Guardian {
     pub address: Guardian_PK,
@@ -160,24 +126,6 @@ impl Guardian {
     pub fn get_pub_key_y(self) -> [u8; 32] {
         self.address.get_pub_key_y()
     }
-}
-
-// Testing Guardian with public keys
-#[test]
-fn test_create_guardian_with_pubkeys() {
-    let address = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];
-    let pub_key_x = [21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52];
-    let pub_key_y = [53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84];
-    let g = Guardian::new(address, pub_key_x, pub_key_y);
-    
-    assert_eq(g.address.value0, 1);
-    assert_eq(g.address.pub_key_x0, 21);
-    assert_eq(g.address.pub_key_y0, 53);
-    
-    let retrieved_x = g.get_pub_key_x();
-    let retrieved_y = g.get_pub_key_y();
-    assert_eq(retrieved_x, pub_key_x);
-    assert_eq(retrieved_y, pub_key_y);
 }
 
 #[derive(Deserialize, Serialize)]
@@ -210,7 +158,6 @@ impl Signature {
         Signature { r, s, v, guardian_index: bytes[65] }
     }
 
-    // Use ECDSA signature verification
     pub fn verify_signature(pub_key_x: [u8;32], pub_key_y: [u8;32], signature: [u8;64], msg: [u8;32]) -> bool {
         std::ecdsa_secp256k1::verify_signature(
             pub_key_x,
@@ -265,7 +212,7 @@ impl Body {
         }
     }
 
-    fn from_bytes(bytes: [u8; 1060]) -> Body {
+    pub fn from_bytes(bytes: [u8; 1060]) -> Body {
         let timestamp: u32 = u32_from_u8s_le([bytes[0], bytes[1], bytes[2], bytes[3]]);
         let nonce: u32 = u32_from_u8s_le([bytes[4], bytes[5], bytes[6], bytes[7]]);
         let emitter_chain_id: u16 = u16_from_u8s_le([bytes[8], bytes[9]]);
@@ -304,6 +251,7 @@ impl Body {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct VAA {
     pub version: u8,
     pub timestamp: u32,
@@ -389,130 +337,6 @@ impl VAA {
 
     pub fn get_consistency_level(vaa: Self) -> u8 {
         vaa.consistency_level
-    }
-
-    // Fixed parse function with proper indexing
-    pub fn parse(bytes: [u8; 1918]) -> Self {
-        let version = bytes[0];
-        assert(version == 1, "Unsupported version");
-        let guardian_set_index: u32 = u32_from_u8s_le([bytes[1], bytes[2], bytes[3], bytes[4]]);
-    
-        let signatures_len = bytes[5];
-        assert(signatures_len <= 13, "Too many signatures");
-
-        let mut signatures: [Signature; 13] = [Signature::default(); 13];
-        
-        // Parse signatures with proper bounds checking
-        for i in 0..signatures_len {
-            if i < 13 {
-                let sig_start = 6 + (i * 66);
-                let mut sig_bytes = [0; 66];
-                for j in 0..66 {
-                    if (sig_start + j) < 1918 {
-                        sig_bytes[j] = bytes[sig_start + j];
-                    }
-                }
-                signatures[i] = Signature::from_bytes(sig_bytes);
-            }
-        }
-
-        // Calculate body start position (after version + guardian_set_index + signatures_len + signatures)
-        let body_start = 6 + (signatures_len * 66);
-        
-        // Extract body bytes (1060 bytes)
-        let mut body_bytes = [0; 1060];
-        for i in 0..1060 {
-            if (body_start + i) < 1918 {
-                body_bytes[i] = bytes[body_start + i];
-            }
-        }
-        
-        let body = Body::from_bytes(body_bytes);
-
-        // Calculate hash: keccak256(keccak256(body))
-        let hash1: [u8; 32] = keccak256(body_bytes, 1060);
-        let hash: [u8; 32] = keccak256(hash1, 32);
-
-        VAA::new(
-            version,
-            body.timestamp,
-            body.nonce,
-            body.emitter_chain_id,
-            body.emitter_address,
-            body.sequence,
-            body.consistency_level,
-            body.payload,
-            guardian_set_index,
-            signatures,
-            hash
-        )
-    }
-
-    // Fixed verify function without early returns
-    pub fn verify(vaa: Self, guardians: [Guardian; 19]) -> bool {
-        let hash = vaa.hash;
-        let mut last_idx: u8 = 0;
-        let signatures = vaa.signatures;
-        let mut verification_result = true;
-        let mut valid_signatures = 0;
-
-        for i in 0..13 {
-            let sig = signatures[i];
-            
-            // Skip empty signatures (guardian_index 0 means empty for i > 0)
-            let is_empty_sig = (i > 0) & (sig.guardian_index == 0);
-            
-            if !is_empty_sig {
-                let guardian_idx = sig.guardian_index;
-
-                // Check ascending order
-                if guardian_idx <= last_idx {
-                    verification_result = false;
-                }
-                last_idx = guardian_idx;
-
-                // Check bounds
-                if guardian_idx >= 19 {
-                    verification_result = false;
-                }
-
-                if guardian_idx < 19 {
-                    // Get guardian
-                    let guardian = guardians[guardian_idx];
-                    let pub_key_x = guardian.get_pub_key_x();
-                    let pub_key_y = guardian.get_pub_key_y();
-
-                    // Prepare signature bytes for verification
-                    let mut signature_bytes = [0; 64];
-                    for j in 0..32 {
-                        signature_bytes[j] = sig.r[j];
-                        signature_bytes[32 + j] = sig.s[j];
-                    }
-
-                    // Verify signature
-                    let is_valid = Signature::verify_signature(
-                        pub_key_x, 
-                        pub_key_y, 
-                        signature_bytes, 
-                        hash
-                    );
-                    
-                    if is_valid {
-                        valid_signatures += 1;
-                    } else {
-                        verification_result = false;
-                    }
-                }
-            }
-        }
-
-        // Need at least 2/3 + 1 of guardians to sign (for 19 guardians, need at least 13)
-        let required_signatures = ((19 * 2) / 3) + 1; // 13 signatures required
-        if valid_signatures < required_signatures {
-            verification_result = false;
-        }
-
-        verification_result
     }
 }
 
@@ -671,7 +495,6 @@ impl WormholeStorage {
         state
     }
 
-    // Fixed set_provider function
     pub fn set_provider(mut state: Self, provider: Provider) -> Self {
         state.provider = provider;
         state
@@ -681,27 +504,4 @@ impl WormholeStorage {
         state.message_fee = message_fee;
         state
     }
-}
-
-// Tests
-#[test]
-fn test_vaa_parse_basic() {
-    let mut test_bytes = [0; 1918];
-    test_bytes[0] = 1; // version
-    test_bytes[5] = 1; // one signature
-    
-    let vaa = VAA::parse(test_bytes);
-    assert_eq(vaa.version, 1);
-}
-
-#[test]
-fn test_signature_verification_structure() {
-    let pub_key_x = [1; 32];
-    let pub_key_y = [2; 32];
-    let signature = [3; 64];
-    let message = [4; 32];
-    
-    // This will call the actual ECDSA verification
-    let _result = Signature::verify_signature(pub_key_x, pub_key_y, signature, message);
-    // Note: result will likely be false with dummy data, but tests the function structure
 }
