@@ -2,6 +2,7 @@
   "dependencies": {
     "@aztec/accounts": "0.87.2",
     "@aztec/noir-contracts.js": "0.87.2",
-    "@aztec/stdlib": "0.87.2"
+    "@aztec/stdlib": "0.87.2",
+    "secp256k1": "^5.0.1"
   }
 }
