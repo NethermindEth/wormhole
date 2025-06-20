@@ -432,28 +432,6 @@ pub contract Wormhole {
         }
     }
 
-    #[public]
-    fn test_verify_signature(
-        hash: [u8; 32],
-        signature_r: [u8; 32],
-        signature_s: [u8; 32],
-        pub_key_x: [u8; 32],
-        pub_key_y: [u8; 32]
-    ) -> bool {
-        let mut signature_bytes = [0; 64];
-        for j in 0..32 {
-            signature_bytes[j] = signature_r[j];
-            signature_bytes[32 + j] = signature_s[j];
-        }
-        
-        std::ecdsa_secp256k1::verify_signature(
-            pub_key_x,
-            pub_key_y,
-            signature_bytes,
-            hash
-        )
-    }
-
     // VAA verification function
     #[private]
     fn verify_vaa(bytes: [u8; 1918]) {
@@ -569,7 +547,7 @@ pub contract Wormhole {
     }
 
     #[test]
-    fn test_verify_vaa_real_data() {
+    unconstrained fn test_verify_vaa_real_data() {
         let mut full_vaa = [0; 1918];
         
         // First VAA data from your examples
@@ -623,7 +601,7 @@ pub contract Wormhole {
     }
 
     #[test]
-    fn test_verify_vaa_parsing() {
+    unconstrained fn test_verify_vaa_parsing() {
         let mut full_vaa = [0; 1918];
         
         // First VAA data from your examples
@@ -723,9 +701,9 @@ pub contract Wormhole {
         
         assert(true);
     }
-
+    
     #[test]
-    fn test_verify_vaa_real_data_2() {
+    unconstrained fn test_verify_vaa_real_data_2() {
         let mut full_vaa = [0; 1918];
         
         // Second VAA data from your examples
@@ -776,7 +754,7 @@ pub contract Wormhole {
     }
 
     #[test]
-    fn test_verify_vaa_parsing_2() {
+    unconstrained fn test_verify_vaa_parsing_2() {
         let mut full_vaa = [0; 1918];
         
         // Second VAA data from your examples
