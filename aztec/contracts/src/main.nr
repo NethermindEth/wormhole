@@ -541,7 +541,7 @@ pub contract Wormhole {
         let version = bytes[0];
         assert(version == 1, "VM version incompatible");
         
-        let (guardian_set_index, signatures_len, signatures, body_bytes, body_length) = parse_vaa_unconstrained(bytes, actual_length);
+        let (_, signatures_len, signatures, body_bytes, body_length) = parse_vaa_unconstrained(bytes, actual_length);
 
         assert(signatures_len >= 1, "Need at least 1 signature");
         assert(signatures_len <= 13, "Too many signatures");
@@ -549,9 +549,8 @@ pub contract Wormhole {
         // Compute the VAA hash
         let hash = compute_vaa_hash_unconstrained(body_bytes, body_length);
         
-        let guardians = unsafe {
-            get_hardcoded_guardians()
-        };
+        // Safety: get_hardcoded_guardians() doesn't need proving mode
+        let guardians = get_hardcoded_guardians();
 
         // Prepare arrays for constrained verification
         let mut pub_keys_x = [[0; 32]; 13];
@@ -560,21 +559,20 @@ pub contract Wormhole {
 
         for i in 0..13 {
             if i < signatures_len {
-                let sig = Signature::from_bytes(signatures[i]);
+                let sig = Signature::from_bytes(signatures[i as u32]);
                 let guardian_idx = sig.guardian_index;
 
                 assert(guardian_idx < 19, "guardian index out of bounds");
 
-                let guardian = unsafe {
-                    get_guardian_by_index_unconstrained(guardian_idx, guardians)
-                };
+                // Safety: get_guardian_by_index_unconstrained() doesn't need proving mode
+                let guardian = get_guardian_by_index_unconstrained(guardian_idx, guardians);
 
                 // Get public key components as byte arrays
                 let pub_key_x = guardian.get_pub_key_x();
                 let pub_key_y = guardian.get_pub_key_y();
 
-                pub_keys_x[i] = pub_key_x;
-                pub_keys_y[i] = pub_key_y;
+                pub_keys_x[i as u32] = pub_key_x;
+                pub_keys_y[i as u32] = pub_key_y;
 
                 // Prepare signature bytes
                 let mut signature_bytes = [0; 64];
@@ -582,7 +580,7 @@ pub contract Wormhole {
                     signature_bytes[j] = sig.r[j];
                     signature_bytes[32 + j] = sig.s[j];
                 }
-                signature_bytes_array[i] = signature_bytes;
+                signature_bytes_array[i as u32] = signature_bytes;
             }
         }
 
@@ -591,6 +589,8 @@ pub contract Wormhole {
 
     #[private]
     fn verify_vaa(bytes: [u8; 2000], actual_length: u32) {
+
+        // Safety: verify_vaa_unconstrained performs parsing and validation that doesn't need constraints
         let (pub_keys_x, pub_keys_y, signature_bytes_array, hash, signatures_len) = unsafe {
             verify_vaa_unconstrained(bytes, actual_length)
         };
@@ -602,9 +602,9 @@ pub contract Wormhole {
         for i in 0..13 {
             if i < signatures_len {
                 let is_valid = std::ecdsa_secp256k1::verify_signature(
-                    pub_keys_x[i],
-                    pub_keys_y[i],
-                    signature_bytes_array[i],
+                    pub_keys_x[i as u32],
+                    pub_keys_y[i as u32],
+                    signature_bytes_array[i as u32],
                     hash
                 );
 
