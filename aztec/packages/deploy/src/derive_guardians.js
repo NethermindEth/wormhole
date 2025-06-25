@@ -1,5 +1,7 @@
-// derive_guardians.js
-const secp256k1 = require('secp256k1');
+// derive_guardians_fixed.js
+import secp256k1 from 'secp256k1';
+import pkg from 'js-sha3';
+const { keccak256 } = pkg;
 
 const guardianData = [
   {
@@ -99,12 +101,42 @@ const guardianData = [
   }
 ];
 
-console.log('// Generated Guardian Public Keys\n');
+function derivedAddressFromPubKey(pubKey) {
+  // Remove 0x04 prefix, hash with keccak256, take last 20 bytes  
+  const publicKeyBytes = pubKey.slice(1); // Remove 0x04 prefix
+  const hash = keccak256(publicKeyBytes);
+  const hashBuffer = Buffer.from(hash, 'hex');
+  return hashBuffer.slice(-20); // Last 20 bytes for Ethereum address
+}
+
+console.log('// Generated Guardian Public Keys with Verification\n');
+console.log('[');
+
+let allValid = true;
 
 guardianData.forEach((guardian, index) => {
   try {
     const privKeyBuffer = Buffer.from(guardian.private, 'hex');
+    
+    // Validate private key length
+    if (privKeyBuffer.length !== 32) {
+      throw new Error(`Invalid private key length: ${privKeyBuffer.length}`);
+    }
+    
     const pubKey = secp256k1.publicKeyCreate(privKeyBuffer, false); // uncompressed format
+    
+    // Verify the derived address matches the expected address
+    const derivedAddr = derivedAddressFromPubKey(pubKey);
+    const expectedAddr = Buffer.from(guardian.public.slice(2), 'hex');
+    
+    if (!derivedAddr.equals(expectedAddr)) {
+      console.error(`❌ Guardian ${index}: Address mismatch!`);
+      console.error(`   Expected: ${guardian.public}`);
+      console.error(`   Derived:  0x${derivedAddr.toString('hex')}`);
+      allValid = false;
+    } else {
+      console.log(`        // ✅ Guardian ${index}: ${guardian.public} (verified)`);
+    }
     
     // Remove the first byte (0x04) and split into X and Y coordinates
     const x = pubKey.slice(1, 33); // X coordinate (32 bytes)
@@ -114,18 +146,27 @@ guardianData.forEach((guardian, index) => {
     const addressHex = guardian.public.slice(2); // Remove '0x'
     const addressBytes = Buffer.from(addressHex, 'hex');
     
-    console.log(`        // Guardian ${index}: ${guardian.public}`);
     console.log(`        Guardian::new(`);
     console.log(`            [${Array.from(addressBytes).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}],`);
     console.log(`            // Public key X`);
     console.log(`            [${Array.from(x).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}],`);
     console.log(`            // Public key Y`);
     console.log(`            [${Array.from(y).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')}]`);
-    console.log(`        ),`);
+    console.log(`        )${index < guardianData.length - 1 ? ',' : ''}`);
     
   } catch (error) {
-    console.error(`Error processing guardian ${index}:`, error);
+    console.error(`❌ Error processing guardian ${index}:`, error);
+    allValid = false;
   }
 });
 
-console.log('\n// Copy the above output into your Rust code');
+console.log('    ]');
+console.log('\n// Verification Summary:');
+console.log(`// Total guardians: ${guardianData.length}`);
+console.log(`// All addresses verified: ${allValid ? '✅ YES' : '❌ NO'}`);
+
+if (allValid) {
+  console.log('\n// 🎉 All guardian keys are valid! Copy the array above into your Rust code.');
+} else {
+  console.log('\n// ⚠️  Some guardian keys failed verification. Check the errors above.');
+}

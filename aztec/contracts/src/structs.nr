@@ -7,6 +7,7 @@ pub struct Provider {
     pub evm_chain_id: u16,
 }
 
+// Keep your Guardian_PK EXACTLY as is - don't touch it
 #[derive(Deserialize, Packable, Serialize)]
 pub struct Guardian_PK {
     // Address (20 bytes)
@@ -99,6 +100,17 @@ impl Guardian_PK {
          self.pub_key_y24, self.pub_key_y25, self.pub_key_y26, self.pub_key_y27,
          self.pub_key_y28, self.pub_key_y29, self.pub_key_y30, self.pub_key_y31]
     }
+
+    // Add ONE optimization - return Fields for ECDSA verification without breaking existing code
+    pub fn get_pub_key_x_field(self) -> Field {
+        let bytes = self.get_pub_key_x();
+        Field::from_le_bytes(bytes)
+    }
+
+    pub fn get_pub_key_y_field(self) -> Field {
+        let bytes = self.get_pub_key_y();
+        Field::from_le_bytes(bytes)
+    }
 }
 
 #[derive(Deserialize, Packable, Serialize)]
@@ -126,6 +138,15 @@ impl Guardian {
     pub fn get_pub_key_y(self) -> [u8; 32] {
         self.address.get_pub_key_y()
     }
+
+    // Add the same optimization here
+    pub fn get_pub_key_x_field(self) -> Field {
+        self.address.get_pub_key_x_field()
+    }
+
+    pub fn get_pub_key_y_field(self) -> Field {
+        self.address.get_pub_key_y_field()
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -146,16 +167,29 @@ impl Signature {
     }
 
     pub fn from_bytes(bytes: [u8; 66]) -> Self {
-        let r = [bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-                  bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
-                  bytes[16], bytes[17], bytes[18], bytes[19], bytes[20], bytes[21], bytes[22], bytes[23],
-                  bytes[24], bytes[25], bytes[26], bytes[27], bytes[28], bytes[29], bytes[30], bytes[31]];
-        let s = [bytes[32], bytes[33], bytes[34], bytes[35], bytes[36], bytes[37], bytes[38], bytes[39],
-                  bytes[40], bytes[41], bytes[42], bytes[43], bytes[44], bytes[45], bytes[46], bytes[47],
-                  bytes[48], bytes[49], bytes[50], bytes[51], bytes[52], bytes[53], bytes[54], bytes[55],
-                  bytes[56], bytes[57], bytes[58], bytes[59], bytes[60], bytes[61], bytes[62], bytes[63]];
-        let v = bytes[64];
-        Signature { r, s, v, guardian_index: bytes[65] }
+        // Wormhole VAA signature format:
+        // byte 0: guardian index
+        // bytes 1-32: r (32 bytes) - BIG ENDIAN
+        // bytes 33-64: s (32 bytes) - BIG ENDIAN  
+        // byte 65: recovery id (v)
+        
+        let guardian_index = bytes[0];
+        
+        // Extract r (bytes 1-32) - keep as big endian
+        let r = [bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
+                 bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15], bytes[16],
+                 bytes[17], bytes[18], bytes[19], bytes[20], bytes[21], bytes[22], bytes[23], bytes[24],
+                 bytes[25], bytes[26], bytes[27], bytes[28], bytes[29], bytes[30], bytes[31], bytes[32]];
+        
+        // Extract s (bytes 33-64) - keep as big endian
+        let s = [bytes[33], bytes[34], bytes[35], bytes[36], bytes[37], bytes[38], bytes[39], bytes[40],
+                 bytes[41], bytes[42], bytes[43], bytes[44], bytes[45], bytes[46], bytes[47], bytes[48],
+                 bytes[49], bytes[50], bytes[51], bytes[52], bytes[53], bytes[54], bytes[55], bytes[56],
+                 bytes[57], bytes[58], bytes[59], bytes[60], bytes[61], bytes[62], bytes[63], bytes[64]];
+        
+        let v = bytes[65];
+        
+        Signature { r, s, v, guardian_index }
     }
 }
 
