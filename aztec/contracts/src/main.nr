@@ -595,6 +595,7 @@ pub contract Wormhole {
             verify_vaa_unconstrained(bytes, actual_length)
         };
 
+        // TODO svlachakis Change this for Testnet
         let required_signatures = 1;
         let mut verified_count = 0;
 
