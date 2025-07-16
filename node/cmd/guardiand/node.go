@@ -1077,6 +1077,7 @@ func runNode(cmd *cobra.Command, args []string) {
 	rpcMap["monadRPC"] = *monadRPC
 	rpcMap["movementRPC"] = *movementRPC
 	rpcMap["mezoRPC"] = *mezoRPC
+	rpcMap["aztecRPC"] = *aztecRPC
 	rpcMap["convergeRPC"] = *convergeRPC
 	rpcMap["plumeRPC"] = *plumeRPC
 	rpcMap["xrplevmRPC"] = *xrplEvmRPC
