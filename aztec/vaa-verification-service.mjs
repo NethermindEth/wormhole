@@ -1,14 +1,11 @@
 // vaa-verification-service.mjs - TESTNET VERSION (FIXED)
 import express from 'express';
-import { SponsoredFeePaymentMethod, getContractInstanceFromDeployParams, Contract, loadContractArtifact, createAztecNodeClient, Fr, AztecAddress } from '@aztec/aztec.js';
+import { createPXEClient, waitForPXE, Contract, loadContractArtifact, createAztecNodeClient, Fr, AztecAddress } from '@aztec/aztec.js';
 import { getSchnorrAccount } from '@aztec/accounts/schnorr';
 import { deriveSigningKey } from '@aztec/stdlib/keys';
-import { createPXEService, getPXEServiceConfig } from '@aztec/pxe/server';
-import { createStore } from "@aztec/kv-store/lmdb"
-import { SPONSORED_FPC_SALT } from '@aztec/constants';
-import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC";
-import WormholeJson from "./contracts/target/wormhole_contracts-Wormhole.json" with { type: "json" };
-import { ProxyLogger, captureProfile } from './utils.mjs';
+import { GrumpkinScalar } from '@aztec/foundation/fields';
+import { readFileSync } from 'fs';
+import WormholeJson from "./contracts/target/wormhole_contracts-Wormhole.json" assert { type: "json" };
 
 const app = express();
 app.use(express.json());
@@ -16,19 +13,13 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 // TESTNET CONFIGURATION - UPDATED WITH FRESH DEPLOYMENT
+const PXE_URL = 'http://localhost:8080'
 const NODE_URL = 'https://aztec-alpha-testnet-fullnode.zkv.xyz/';
-const PRIVATE_KEY = '0x0ff5c4c050588f4614255a5a4f800215b473e442ae9984347b3a727c3bb7ca55'; // owner-wallet secret key. TODO: change and move to .env
-const CONTRACT_ADDRESS = '0x277e4b8fd9893fdc1fdd30c8da931cce3226450047649738387321665405e1f0'; // Fresh Wormhole contract
-const SALT = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Salt used in deployment
+const PRIVATE_KEY = '0x0e68a984193a040269c37938c99dc2f5ed365c22363bddc1828eb0404ddb89ae'; // Your testnet private key
+const CONTRACT_ADDRESS = '0x07d0c36d825f49fb36bb285f2d809260d945c171795a4584097a5e17a72f6540'; // Your deployed contract address on testnet
+const SALT = '0x29b450386f343ecf24465a83286969c8c2f13b22129437bf881acaf42d218dff'; // Salt used in deployment
 
-let pxe, nodeClient, wormholeContract, paymentMethod, isReady = false;
-
-// Helper function to get the SponsoredFPC instance
-async function getSponsoredFPCInstance() {
-  return await getContractInstanceFromDeployParams(SponsoredFPCContract.artifact, {
-    salt: new Fr(SPONSORED_FPC_SALT),
-  });
-}
+let pxe, nodeClient, wormholeContract, isReady = false;
 
 // Initialize Aztec for Testnet
 async function init() {
@@ -44,35 +35,12 @@ async function init() {
   
   try {
     // Create PXE and Node clients
-    nodeClient = createAztecNodeClient(NODE_URL);
-    const store = await createStore('pxe', {
-      dataDirectory: 'store',
-      dataStoreMapSizeKB: 1e6,
-    });
-    const config = getPXEServiceConfig();
-
-    const l1Contracts = await nodeClient.getL1ContractAddresses();
-    const configWithContracts = {
-      ...config,
-      l1Contracts,
-    };
-    ProxyLogger.create();
-    const proxyLogger = ProxyLogger.getInstance();
-    pxe = await createPXEService(nodeClient, configWithContracts, { 
-      store,  
-      loggers: {
-        prover: proxyLogger.createLogger('pxe:bb:wasm:bundle:proxied'),
-      } 
-    });
-    console.log('✅ Connected PXE to Aztec node and initialized');
+    pxe = createPXEClient(PXE_URL);
+    await waitForPXE(pxe);
     
-    const sponsoredFPC = await getSponsoredFPCInstance();
-    await pxe.registerContract({
-      instance: sponsoredFPC,
-      artifact: SponsoredFPCContract.artifact,
-    });
-    paymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
-
+    nodeClient = createAztecNodeClient(NODE_URL);
+    console.log('✅ Connected to Aztec node and PXE');
+    
     // Get contract instance from the node (Alex's simpler approach)
     console.log('🔄 Fetching contract instance from node...');
     const contractAddress = AztecAddress.fromString(CONTRACT_ADDRESS);
@@ -126,7 +94,7 @@ async function init() {
     // Get wallet (this should work since the account exists on testnet)
     const wallet = await schnorrAccount.register();
     console.log(`✅ Using wallet: ${wallet.getAddress()}`);
-
+    
     // Now create the contract object
     console.log(`🔄 Creating contract instance at ${contractAddress.toString()}...`);
     console.log(`📍 Contract artifact name: ${contractArtifact.name}`);
@@ -143,6 +111,7 @@ async function init() {
     
     isReady = true;
     console.log(`✅ Connected to Wormhole contract on TESTNET: ${CONTRACT_ADDRESS}`);
+    console.log(`✅ PXE URL: ${PXE_URL}`);
     console.log(`✅ Node URL: ${NODE_URL}`);
     
   } catch (error) {
@@ -157,6 +126,7 @@ app.get('/health', (req, res) => {
     status: isReady ? 'healthy' : 'initializing',
     network: 'testnet',
     timestamp: new Date().toISOString(),
+    pxeUrl: PXE_URL,
     nodeUrl: NODE_URL,
     contractAddress: CONTRACT_ADDRESS,
     walletAddress: 'using PXE accounts'
@@ -203,7 +173,7 @@ app.post('/verify', async (req, res) => {
     console.log('🔄 Calling contract method verify_vaa...');
     const tx = await wormholeContract.methods
       .verify_vaa(vaaArray, actualLength)
-      .send({ fee: { paymentMethod } })
+      .send()
       .wait();
     
     console.log(`✅ VAA verified successfully on TESTNET: ${tx.txHash}`);
@@ -298,15 +268,10 @@ app.post('/test', async (req, res) => {
   
   // Call verify_vaa function with padded bytes and actual length
   console.log('🔄 Calling contract method verify_vaa with PADDED data...');
-  const interaction = await wormholeContract.methods
-      .verify_vaa(vaaArray, actualLength);
-
-  console.log('🔄 Capturing interaction profile...');
-
-  await captureProfile('verify_vaa', interaction);
-
-  console.log('🔄 Sending transaction...');
-  await interaction.send({ fee: { paymentMethod } }).wait();
+  const tx = await wormholeContract.methods
+    .verify_vaa(vaaArray, actualLength)
+    .send()
+    .wait();
   
   console.log(`✅ VAA verified successfully on TESTNET: ${tx.txHash}`);
   
@@ -335,6 +300,7 @@ init().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀 VAA Verification Service running on port ${PORT}`);
     console.log(`🌐 Network: TESTNET`);
+    console.log(`📡 PXE: ${PXE_URL}`);
     console.log(`📡 Node: ${NODE_URL}`);
     console.log(`📄 Contract: ${CONTRACT_ADDRESS}`);
     console.log('Available endpoints:');
