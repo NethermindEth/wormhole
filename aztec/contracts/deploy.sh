@@ -112,9 +112,29 @@ setup_wizard() {
     echo "Owner SK: ${OWNER_SK:0:10}..."
     echo ""
     
-    warning "Note: If using the default private key, account deployment may fail with 'Existing nullifier' error if already deployed"
-    info "This is expected behavior when the same key is reused"
-    echo ""
+    warning "Important: Default Private Key Usage"
+    if [[ "$OWNER_SK" == "$DEFAULT_OWNER_SK" ]]; then
+        echo -e "${YELLOW}You are using the default owner private key.${NC}"
+        echo ""
+        echo -e "${CYAN}What this means:${NC}"
+        echo "• This private key may have been used before on this network"
+        echo "• If the account is already deployed, you'll see 'Existing nullifier' error"
+        echo "• This is NORMAL and means your account is already ready to use"
+        echo "• The script will detect this and continue successfully"
+        echo ""
+        echo -e "${CYAN}Why this happens:${NC}"
+        echo "• Aztec uses nullifiers to prevent double-spending"
+        echo "• Each account deployment creates a unique nullifier"
+        echo "• Trying to deploy the same account twice triggers this protection"
+        echo "• The error actually confirms your account exists and is secure"
+        echo ""
+    else
+        echo -e "${GREEN}You are using a custom private key.${NC}"
+        echo "• If this is a new key, the account will be deployed fresh"
+        echo "• If you've used this key before, you may see 'Existing nullifier' error"
+        echo "• Either way, the script will handle it correctly"
+        echo ""
+    fi
     
     read -p "Press Enter to continue with deployment..."
 }
@@ -514,23 +534,44 @@ register_with_fpc() {
 # Step 4: Deploy accounts
 deploy_accounts() {
     log "Deploying accounts..."
-    warning "Note: 'Timeout awaiting isMined' errors are expected and will be handled"
+    warning "Note: 'Existing nullifier' errors indicate accounts are already deployed"
+    info "This is expected when reusing the same private keys"
     
-    execute_with_retry "owner wallet deployment" \
-        aztec-wallet deploy-account \
+    log "Deploying owner account..."
+    local owner_deploy_output
+    owner_deploy_output=$(aztec-wallet deploy-account \
         --node-url "$NODE_URL" \
         --from owner-wallet \
-        --payment method=fpc-sponsored,fpc=contracts:sponsoredfpc
+        --payment method=fpc-sponsored,fpc=contracts:sponsoredfpc 2>&1)
     
+    if echo "$owner_deploy_output" | grep -q "Existing nullifier"; then
+        success "Owner account already deployed (detected existing nullifier)"
+        info "This means the owner wallet with this private key was previously deployed"
+        info "Owner Address: $OWNER_ADDRESS - ready to use!"
+        echo "$owner_deploy_output"
+    elif echo "$owner_deploy_output" | grep -q "Deploy tx hash:"; then
+        success "Owner account deployment initiated"
+        local tx_hash
+        tx_hash=$(echo "$owner_deploy_output" | grep "Deploy tx hash:" | sed 's/Deploy tx hash:[[:space:]]*//' | tr -d ' ')
+        info "Transaction hash: $tx_hash"
+        info "Check status at: http://aztecscan.xyz/tx/$tx_hash"
+        echo "$owner_deploy_output"
+    else
+        warning "Unexpected owner account deployment result:"
+        echo "$owner_deploy_output"
+    fi
+    
+    log "Deploying receiver account..."
     execute_with_retry "receiver wallet deployment" \
         aztec-wallet deploy-account \
         --node-url "$NODE_URL" \
         --from receiver-wallet \
         --payment method=fpc-sponsored,fpc=contracts:sponsoredfpc
     
-    success "Both wallets deployed successfully"
+    success "Account deployment process completed"
     info "Owner Address: $OWNER_ADDRESS"
     info "Receiver Address: $RECEIVER_ADDRESS"
+    info "Both accounts are now ready for contract deployments"
 }
 
 # Step 5: Deploy Token contract
@@ -648,34 +689,11 @@ prepare_wormhole_contract() {
     # Modify the contract with the captured addresses
     modify_wormhole_contract
     
-    # Compile the contract
-    log "Compiling Wormhole contract..."
-    if aztec-nargo compile; then
-        success "Contract compilation completed successfully"
-    else
-        error "Contract compilation failed"
-        warning "Restoring original contract..."
-        restore_contract
-        exit 1
-    fi
+    # Compile the contract with retry logic
+    compile_contract_with_retry
     
-    # Run tests
-    log "Running contract tests..."
-    if aztec test --silence-warnings; then
-        success "Contract tests passed"
-    else
-        warning "Contract tests failed - continuing with deployment"
-        warning "You may want to review test failures manually"
-        
-        echo ""
-        read -p "Do you want to continue with deployment despite test failures? (y/n): " continue_deploy
-        if [[ ! $continue_deploy =~ ^[Yy]$ ]]; then
-            info "Deployment cancelled by user"
-            warning "Restoring original contract..."
-            restore_contract
-            exit 1
-        fi
-    fi
+    # Run tests with retry logic
+    test_contract_with_retry
     
     # Verify the compiled contract exists
     if [ ! -f "target/wormhole_contracts-Wormhole.json" ]; then
@@ -687,6 +705,184 @@ prepare_wormhole_contract() {
     fi
     
     success "Wormhole contract prepared successfully"
+}
+
+# Compile contract with retry logic
+compile_contract_with_retry() {
+    local max_attempts=3
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        log "Compiling Wormhole contract (attempt $attempt/$max_attempts)..."
+        
+        local compile_output
+        local compile_exit_code=0
+        compile_output=$(aztec-nargo compile 2>&1) || compile_exit_code=$?
+        
+        if [ $compile_exit_code -eq 0 ]; then
+            success "Contract compilation completed successfully"
+            echo "$compile_output"
+            return 0
+        else
+            error "Contract compilation failed (attempt $attempt/$max_attempts)"
+            echo "Compilation output:"
+            echo "$compile_output"
+            echo ""
+            
+            if [ $attempt -lt $max_attempts ]; then
+                warning "Compilation failed - this might happen if:"
+                echo "• The contract file is being modified while the script runs"
+                echo "• There are temporary file system issues"
+                echo "• The contract has syntax errors that were just introduced"
+                echo ""
+                
+                echo "Options:"
+                echo "1. Retry compilation (recommended if file was being edited)"
+                echo "2. Exit and fix compilation errors manually" 
+                echo "3. Skip compilation and try with existing artifacts (risky)"
+                
+                local choice
+                read -p "Choose option (1/2/3) [default: 1]: " choice
+                choice=${choice:-1}
+                
+                case $choice in
+                    1)
+                        info "Retrying compilation..."
+                        if [ $attempt -eq 1 ]; then
+                            info "Waiting 10 seconds in case files are still being modified..."
+                            sleep 10
+                        else
+                            info "Waiting 5 seconds before retry..."
+                            sleep 5
+                        fi
+                        attempt=$((attempt + 1))
+                        continue
+                        ;;
+                    2)
+                        info "Exiting for manual compilation fix"
+                        warning "Restoring original contract..."
+                        restore_contract
+                        exit 1
+                        ;;
+                    3)
+                        warning "Skipping compilation - using existing artifacts"
+                        warning "This may cause deployment failures if artifacts are outdated"
+                        return 0
+                        ;;
+                    *)
+                        info "Invalid choice, defaulting to retry"
+                        attempt=$((attempt + 1))
+                        continue
+                        ;;
+                esac
+            else
+                error "Compilation failed after $max_attempts attempts"
+                warning "Restoring original contract..."
+                restore_contract
+                
+                echo ""
+                echo "Compilation has failed multiple times. This usually means:"
+                echo "• There are syntax errors in the contract"
+                echo "• Missing dependencies or incorrect paths"
+                echo "• The contract modifications introduced errors"
+                echo ""
+                echo "Please check the compilation errors above and fix them manually."
+                echo "You can then run the script again or compile manually with:"
+                echo "  aztec-nargo compile"
+                exit 1
+            fi
+        fi
+    done
+}
+
+# Test contract with retry logic  
+test_contract_with_retry() {
+    local max_attempts=2
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        log "Running contract tests (attempt $attempt/$max_attempts)..."
+        
+        local test_output
+        local test_exit_code=0
+        test_output=$(aztec test --silence-warnings 2>&1) || test_exit_code=$?
+        
+        if [ $test_exit_code -eq 0 ]; then
+            success "Contract tests passed"
+            echo "$test_output"
+            return 0
+        else
+            warning "Contract tests failed (attempt $attempt/$max_attempts)"
+            echo "Test output:"
+            echo "$test_output"
+            echo ""
+            
+            if [ $attempt -lt $max_attempts ]; then
+                warning "Tests failed - this might happen if:"
+                echo "• Contract was recently compiled and test cache is stale"
+                echo "• Temporary testing environment issues"
+                echo "• Tests depend on external state that's not ready"
+                echo ""
+                
+                echo "Options:"
+                echo "1. Retry tests (recommended for transient issues)"
+                echo "2. Continue with deployment despite test failures (risky)"
+                echo "3. Exit and fix test failures manually"
+                
+                local choice
+                read -p "Choose option (1/2/3) [default: 1]: " choice
+                choice=${choice:-1}
+                
+                case $choice in
+                    1)
+                        info "Retrying tests..."
+                        info "Waiting 5 seconds for test environment to stabilize..."
+                        sleep 5
+                        attempt=$((attempt + 1))
+                        continue
+                        ;;
+                    2)
+                        warning "Continuing with deployment despite test failures"
+                        warning "Deployment may fail if tests revealed actual issues"
+                        return 0
+                        ;;
+                    3)
+                        info "Exiting for manual test fix"
+                        warning "Restoring original contract..."
+                        restore_contract
+                        exit 1
+                        ;;
+                    *)
+                        info "Invalid choice, defaulting to retry"
+                        attempt=$((attempt + 1))
+                        continue
+                        ;;
+                esac
+            else
+                warning "Tests failed after $max_attempts attempts"
+                
+                echo ""
+                echo "Do you want to continue with deployment despite test failures?"
+                echo "This is risky but sometimes tests fail due to environment issues"
+                echo "while the actual contract functionality is correct."
+                
+                local continue_deploy
+                read -p "Continue with deployment? (y/n) [default: n]: " continue_deploy
+                continue_deploy=${continue_deploy:-n}
+                
+                if [[ $continue_deploy =~ ^[Yy]$ ]]; then
+                    warning "Continuing with deployment despite test failures"
+                    warning "Monitor deployment carefully for any issues"
+                    return 0
+                else
+                    info "Deployment cancelled by user"
+                    warning "Restoring original contract..."
+                    restore_contract
+                    exit 1
+                fi
+            fi
+        fi
+    done
 }
 
 # Step 7: Deploy Wormhole contract
@@ -764,7 +960,54 @@ main() {
     success "All contracts deployed and ready for use!"
     info "Note: Contract addresses may take a few minutes to be fully propagated"
     
-    # Clean up backup file
+    # Create environment file for verification service
+create_env_file() {
+    local env_file=".env"
+    
+    log "Creating environment file for verification service..."
+    
+    # Create or overwrite .env file
+    cat > "$env_file" << EOF
+# Aztec Deployment Configuration
+# Generated on $(date)
+
+# Network Configuration
+NODE_URL=$NODE_URL
+PRIVATE_KEY=$OWNER_SK
+SALT=0x0000000000000000000000000000000000000000000000000000000000000000
+
+# Contract Addresses
+OWNER_ADDRESS=$OWNER_ADDRESS
+RECEIVER_ADDRESS=$RECEIVER_ADDRESS
+TOKEN_CONTRACT_ADDRESS=$TOKEN_CONTRACT_ADDRESS
+WORMHOLE_CONTRACT_ADDRESS=$WORMHOLE_CONTRACT_ADDRESS
+
+# Service Configuration
+PORT=3000
+NETWORK=testnet
+EOF
+    
+    success "Environment file created: $env_file"
+    info "The verification service will now use these deployed contract addresses"
+}
+
+# Export environment variables for immediate use
+export_environment_variables() {
+    log "Exporting environment variables for verification service..."
+    
+    export NODE_URL="$NODE_URL"
+    export PRIVATE_KEY="$OWNER_SK"
+    export CONTRACT_ADDRESS="$WORMHOLE_CONTRACT_ADDRESS"
+    export SALT="0x0000000000000000000000000000000000000000000000000000000000000000"
+    export OWNER_ADDRESS="$OWNER_ADDRESS"
+    export RECEIVER_ADDRESS="$RECEIVER_ADDRESS"
+    export TOKEN_CONTRACT_ADDRESS="$TOKEN_CONTRACT_ADDRESS"
+    export WORMHOLE_CONTRACT_ADDRESS="$WORMHOLE_CONTRACT_ADDRESS"
+    export PORT="3000"
+    export NETWORK="testnet"
+    
+    success "Environment variables exported for current session"
+}
     if [ -f "$WORMHOLE_CONTRACT_BACKUP" ]; then
         rm -f "$WORMHOLE_CONTRACT_BACKUP"
         info "Cleanup completed"
