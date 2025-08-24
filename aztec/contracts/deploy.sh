@@ -535,38 +535,22 @@ register_with_fpc() {
 deploy_accounts() {
     log "Deploying accounts..."
     warning "Note: 'Existing nullifier' errors indicate accounts are already deployed"
-    info "This is expected when reusing the same private keys"
+    info "This is expected when reusing the same private keys and will be handled automatically"
+    info "Account deployment now uses default payment method to avoid array size constraints"
     
     log "Deploying owner account..."
-    local owner_deploy_output
-    owner_deploy_output=$(aztec-wallet deploy-account \
+    # Try deployment without FPC first to avoid array size issues
+    execute_with_retry "owner wallet deployment" \
+        aztec-wallet deploy-account \
         --node-url "$NODE_URL" \
-        --from owner-wallet \
-        --payment method=fpc-sponsored,fpc=contracts:sponsoredfpc 2>&1)
-    
-    if echo "$owner_deploy_output" | grep -q "Existing nullifier"; then
-        success "Owner account already deployed (detected existing nullifier)"
-        info "This means the owner wallet with this private key was previously deployed"
-        info "Owner Address: $OWNER_ADDRESS - ready to use!"
-        echo "$owner_deploy_output"
-    elif echo "$owner_deploy_output" | grep -q "Deploy tx hash:"; then
-        success "Owner account deployment initiated"
-        local tx_hash
-        tx_hash=$(echo "$owner_deploy_output" | grep "Deploy tx hash:" | sed 's/Deploy tx hash:[[:space:]]*//' | tr -d ' ')
-        info "Transaction hash: $tx_hash"
-        info "Check status at: http://aztecscan.xyz/tx/$tx_hash"
-        echo "$owner_deploy_output"
-    else
-        warning "Unexpected owner account deployment result:"
-        echo "$owner_deploy_output"
-    fi
+        --from owner-wallet
     
     log "Deploying receiver account..."
+    # Try deployment without FPC first to avoid array size issues
     execute_with_retry "receiver wallet deployment" \
         aztec-wallet deploy-account \
         --node-url "$NODE_URL" \
-        --from receiver-wallet \
-        --payment method=fpc-sponsored,fpc=contracts:sponsoredfpc
+        --from receiver-wallet
     
     success "Account deployment process completed"
     info "Owner Address: $OWNER_ADDRESS"
@@ -910,6 +894,55 @@ deploy_wormhole_contract() {
     restore_contract
 }
 
+# Create environment file for verification service
+create_env_file() {
+    local env_file=".env"
+    
+    log "Creating environment file for verification service..."
+    
+    # Create or overwrite .env file
+    cat > "$env_file" << EOF
+# Aztec Deployment Configuration
+# Generated on $(date)
+
+# Network Configuration
+NODE_URL=$NODE_URL
+PRIVATE_KEY=$OWNER_SK
+SALT=0x0000000000000000000000000000000000000000000000000000000000000000
+
+# Contract Addresses
+OWNER_ADDRESS=$OWNER_ADDRESS
+RECEIVER_ADDRESS=$RECEIVER_ADDRESS
+TOKEN_CONTRACT_ADDRESS=$TOKEN_CONTRACT_ADDRESS
+WORMHOLE_CONTRACT_ADDRESS=$WORMHOLE_CONTRACT_ADDRESS
+
+# Service Configuration
+PORT=3000
+NETWORK=testnet
+EOF
+    
+    success "Environment file created: $env_file"
+    info "The verification service will now use these deployed contract addresses"
+}
+
+# Export environment variables for immediate use
+export_environment_variables() {
+    log "Exporting environment variables for verification service..."
+    
+    export NODE_URL="$NODE_URL"
+    export PRIVATE_KEY="$OWNER_SK"
+    export CONTRACT_ADDRESS="$WORMHOLE_CONTRACT_ADDRESS"
+    export SALT="0x0000000000000000000000000000000000000000000000000000000000000000"
+    export OWNER_ADDRESS="$OWNER_ADDRESS"
+    export RECEIVER_ADDRESS="$RECEIVER_ADDRESS"
+    export TOKEN_CONTRACT_ADDRESS="$TOKEN_CONTRACT_ADDRESS"
+    export WORMHOLE_CONTRACT_ADDRESS="$WORMHOLE_CONTRACT_ADDRESS"
+    export PORT="3000"
+    export NETWORK="testnet"
+    
+    success "Environment variables exported for current session"
+}
+
 # Cleanup function
 cleanup_on_exit() {
     warning "Script interrupted - cleaning up..."
@@ -960,54 +993,11 @@ main() {
     success "All contracts deployed and ready for use!"
     info "Note: Contract addresses may take a few minutes to be fully propagated"
     
-    # Create environment file for verification service
-create_env_file() {
-    local env_file=".env"
+    # Create environment file and export variables
+    create_env_file
+    export_environment_variables
     
-    log "Creating environment file for verification service..."
-    
-    # Create or overwrite .env file
-    cat > "$env_file" << EOF
-# Aztec Deployment Configuration
-# Generated on $(date)
-
-# Network Configuration
-NODE_URL=$NODE_URL
-PRIVATE_KEY=$OWNER_SK
-SALT=0x0000000000000000000000000000000000000000000000000000000000000000
-
-# Contract Addresses
-OWNER_ADDRESS=$OWNER_ADDRESS
-RECEIVER_ADDRESS=$RECEIVER_ADDRESS
-TOKEN_CONTRACT_ADDRESS=$TOKEN_CONTRACT_ADDRESS
-WORMHOLE_CONTRACT_ADDRESS=$WORMHOLE_CONTRACT_ADDRESS
-
-# Service Configuration
-PORT=3000
-NETWORK=testnet
-EOF
-    
-    success "Environment file created: $env_file"
-    info "The verification service will now use these deployed contract addresses"
-}
-
-# Export environment variables for immediate use
-export_environment_variables() {
-    log "Exporting environment variables for verification service..."
-    
-    export NODE_URL="$NODE_URL"
-    export PRIVATE_KEY="$OWNER_SK"
-    export CONTRACT_ADDRESS="$WORMHOLE_CONTRACT_ADDRESS"
-    export SALT="0x0000000000000000000000000000000000000000000000000000000000000000"
-    export OWNER_ADDRESS="$OWNER_ADDRESS"
-    export RECEIVER_ADDRESS="$RECEIVER_ADDRESS"
-    export TOKEN_CONTRACT_ADDRESS="$TOKEN_CONTRACT_ADDRESS"
-    export WORMHOLE_CONTRACT_ADDRESS="$WORMHOLE_CONTRACT_ADDRESS"
-    export PORT="3000"
-    export NETWORK="testnet"
-    
-    success "Environment variables exported for current session"
-}
+    # Clean up backup file
     if [ -f "$WORMHOLE_CONTRACT_BACKUP" ]; then
         rm -f "$WORMHOLE_CONTRACT_BACKUP"
         info "Cleanup completed"
