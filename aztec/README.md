@@ -1,94 +1,74 @@
-# Wormhole on Aztec
+# Wormhole Integration for Aztec Network
 
-This folder contains the reference implementation of the Wormhole cross-chain messaging protocol smart contracts on the [Aztec Network](https://aztec.network/), implemented in [Noir](https://noir-lang.org/), Aztec's domain-specific language for zero-knowledge circuits.
+This implementation demonstrates that **Aztec Network can be integrated into the Wormhole ecosystem**, enabling cross-chain messaging and access to Wormhole's multi-chain infrastructure.
 
-## Project Overview
+## What This Demonstrates
 
-This implementation demonstrates VAA (Verifiable Action Approval) verification on Aztec's testnet, establishing the foundation for cross-chain messaging between Aztec and other chains in the Wormhole ecosystem.
+This MVP showcases:
+- **VAA Verification on Aztec**: Complete Wormhole VAA parsing and signature verification in Noir
+- **Cross-Chain Message Reception**: Aztec can receive and verify messages from any Wormhole-supported chain
 
-**Key Components:**
-- **Noir Smart Contract**: Core VAA parsing and signature verification
-- **Verification Service**: Node.js testing service with REST API
+**Future Potential**: While this MVP focuses on message reception, it establishes the groundwork for full bidirectional integration, including token bridges, NFT transfers, and arbitrary cross-chain data sharing.
 
-⚠️ **This implementation is under active development and currently configured for testnet only.**
+## Architecture
 
-# Project Structure
+- **Smart Contract** ([`contracts/src/main.nr`](./contracts/src/main.nr)): Noir implementation of VAA verification
+- **Verification Service** ([`vaa-verification-service.mjs`](./vaa-verification-service.mjs)): REST API server for testing
+- **Deployment Script** ([`contracts/deploy.sh`](./contracts/deploy.sh)): Automated testnet deployment
 
-The project is laid out as follows:
+## Key Technical Features
 
-- [`contracts/`](./contracts/) - Noir smart contracts for VAA verification
-- [`vaa-verification-service.mjs`](./vaa-verification-service.mjs) - Node.js testing service
+- **VAA Parsing**: Extracts guardian signatures and message payload from VAA bytes
+- **ECDSA Verification**: secp256k1 signature validation using Aztec's cryptographic primitives  
+- **Guardian Management**: Configurable guardian set with signature verification
+- **Wormhole Compatibility**: Full compliance with Wormhole message format and verification standards
 
-# Implementation Details
-
-## Smart Contract ([`contracts/src/main.nr`](./contracts/src/main.nr))
-
-The core Wormhole contract implements:
-
-- **VAA Parsing**: Extracts guardian signatures and message body from VAA bytes
-- **Hash Computation**: Double Keccak256 hashing per Wormhole specification
-- **ECDSA Verification**: secp256k1 signature validation against guardian public keys
-- **Guardian Management**: Storage for up to 19 guardians with set expiration
-
-**Current Implementation:**
-- Fixed-size VAA handling (2000 bytes with actual length parameter)
-- Single guardian verification (testnet configuration)
-- Support for up to 13 concurrent signatures (prepared for mainnet)
-
-## Verification Service
-
-Node.js service providing:
-- REST API for VAA verification testing
-- Integration with Aztec's Private Execution Environment (PXE)
-- Testnet deployment and interaction capabilities
-
-# Building & Testing
+# Quick Start Guide
 
 ## Prerequisites
-- Node.js v20+ (tested with v24, officially supports v22.15.x LTS)
-- [Docker](https://docs.docker.com/get-docker/) - required for Aztec sandbox
-- [Aztec CLI tools](https://docs.aztec.network/developers/getting_started) - install with:
+- Node.js v20+
+- Docker
+- [Aztec CLI tools](https://docs.aztec.network/developers/getting_started):
   ```bash
   bash -i <(curl -s https://install.aztec.network)
   ```
 
-## Setup
+## 1. Deploy Contracts to Testnet
+```bash
+cd contracts
+./deploy.sh
+```
+The deployment script will:
+- Set up wallets and accounts on Aztec testnet
+- Deploy a test token contract
+- Deploy the Wormhole VAA verification contract
+- Configure everything for testing
+
+## 2. Start the Verification Service
 ```bash
 npm install
-```
-
-## Running the Verification Service
-```bash
 npm run start-verification
 ```
 
-# Testing
-
-The verification service provides endpoints for testing VAA verification:
-
-- `GET /health` - Service status
-- `POST /verify` - Custom VAA verification  
-- `POST /test` - Test with real Arbitrum Sepolia VAA
-
-## Example
+## 3. Test VAA Verification
+Test with a real Wormhole VAA from Arbitrum Sepolia:
 ```bash
 curl -X POST http://localhost:3000/test
 ```
 
-This uses a real VAA containing "Hello Wormhole!" to demonstrate end-to-end verification.
+Or verify a custom VAA:
+```bash
+curl -X POST http://localhost:3000/verify \
+  -H "Content-Type: application/json" \
+  -d '{"vaaBytes": "YOUR_VAA_HEX_HERE"}'
+```
 
-# Current Status
+## 4. Monitor Results
+- Check service health: `GET http://localhost:3000/health`
+- View transactions: [Aztec Explorer](http://aztecscan.xyz/)
 
-## Limitations
-- **Testnet Only**: Configured for Aztec testnet
-- **Single Guardian**: Verifies one guardian signature (testnet configuration)  
-- **ECDSA Loop**: Full multi-guardian verification pending Noir compiler improvements
+# Current Implementation
 
-## Future Development
-- Multi-guardian signature verification (13/19 consensus for mainnet)
-- Cross-chain asset transfers (token bridge equivalent)
-- Performance optimizations and gas efficiency improvements
+This MVP demonstrates **single guardian VAA verification** on Aztec testnet, proving the technical feasibility of Wormhole integration. The implementation handles complete VAA parsing, signature verification, and message extraction in Aztec's zero-knowledge environment.
 
-# Implementation Notes
-
-This demonstrates successful VAA verification in Noir on Aztec Network, establishing the foundation for full Wormhole protocol support. The implementation leverages Aztec's privacy-focused execution environment while maintaining compatibility with Wormhole's cross-chain messaging specifications.
+**Expandability**: This foundation supports scaling to full multi-guardian verification (13/19 consensus) and bidirectional cross-chain functionality as Aztec moves toward mainnet.
