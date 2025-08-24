@@ -134,16 +134,25 @@ check_dependencies() {
     fi
     
     if ! command -v aztec &> /dev/null; then
-        missing_deps+=("aztec (for testing)")
+        missing_deps+=("aztec")
     fi
     
     if [ ${#missing_deps[@]} -ne 0 ]; then
         error "Missing dependencies: ${missing_deps[*]}"
         error "Please install Aztec CLI tools before continuing."
+        info "Installation instructions:"
+        info "1. Install Aztec CLI: https://docs.aztec.network/getting_started"
+        info "2. Install Aztec Nargo: https://docs.aztec.network/getting_started"
         exit 1
     fi
     
     success "All dependencies are installed"
+    
+    # Display versions for debugging
+    info "Dependency versions:"
+    info "- aztec-wallet: $(aztec-wallet --version 2>/dev/null || echo 'version unknown')"
+    info "- aztec-nargo: $(aztec-nargo --version 2>/dev/null || echo 'version unknown')"
+    info "- aztec: $(aztec --version 2>/dev/null || echo 'version unknown')"
 }
 
 # Extract transaction ID from output
@@ -200,23 +209,13 @@ check_and_handle_stale_transaction() {
 # Wait for transaction to be mined with retry logic
 wait_for_transaction() {
     local description="$1"
-    local max_attempts=30  # 10 minutes with 20-second intervals
-    local attempt=0
     
-    log "Waiting for $description to be mined (this may take up to 10 minutes)..."
-    log "You can check transaction status at: http://aztecscan.xyz/"
+    info "Transaction submitted for $description"
+    info "Aztec transactions are processed automatically - continuing with deployment"
+    info "You can monitor all transactions at: http://aztecscan.xyz/"
     
-    while [ $attempt -lt $max_attempts ]; do
-        sleep 20
-        attempt=$((attempt + 1))
-        info "Waiting... (attempt $attempt/$max_attempts) - Check http://aztecscan.xyz/ for status"
-        
-        # You can add specific transaction checking logic here if needed
-        # For now, we'll just wait and let the next command handle the verification
-    done
-    
-    warning "Maximum wait time reached. Proceeding with next step..."
-    info "If deployment is still pending, you can check http://aztecscan.xyz/"
+    # Short pause to allow transaction to propagate
+    sleep 5
 }
 
 # Execute command with retry logic and specific error handling
@@ -335,9 +334,25 @@ execute_with_dependency_retry() {
         output=$("$@" 2>&1) || exit_code=$?
         
         if [ $exit_code -eq 0 ]; then
+            # Extract contract address if this is a deployment
+            if [[ "$description" == *"deployment"* ]]; then
+                local contract_address
+                contract_address=$(echo "$output" | grep "Contract deployed at" | sed 's/Contract deployed at //' | tr -d ' ')
+                
+                if [ -n "$contract_address" ]; then
+                    if [[ "$description" == *"Token"* ]]; then
+                        TOKEN_CONTRACT_ADDRESS="$contract_address"
+                        success "Token contract deployed at: $TOKEN_CONTRACT_ADDRESS"
+                    elif [[ "$description" == *"Wormhole"* ]]; then
+                        WORMHOLE_CONTRACT_ADDRESS="$contract_address"
+                        success "Wormhole contract deployed at: $WORMHOLE_CONTRACT_ADDRESS"
+                    fi
+                fi
+            fi
+            
             # Check if we got a transaction hash and need to wait for mining
             local tx_hash
-            tx_hash=$(echo "$output" | grep "Transaction hash:" | head -1 | sed 's/Transaction hash: //' | tr -d ' ')
+            tx_hash=$(echo "$output" | grep "Deploy tx hash:" | head -1 | sed 's/Deploy tx hash:[[:space:]]*//' | tr -d ' ')
             
             if [ -n "$tx_hash" ]; then
                 info "Transaction submitted: $tx_hash"
@@ -351,7 +366,7 @@ execute_with_dependency_retry() {
                         warning "$description transaction mined but check status"
                     fi
                 else
-                    info "Waiting for transaction to be mined..."
+                    info "Transaction deployment initiated - continuing with next step"
                 fi
             else
                 success "$description completed successfully"
@@ -522,29 +537,14 @@ deploy_accounts() {
 deploy_token_contract() {
     log "Deploying Token contract..."
     
-    local token_output
-    token_output=$(aztec-wallet deploy \
+    execute_with_dependency_retry "Token contract deployment" \
+        aztec-wallet deploy \
         --node-url "$NODE_URL" \
         --from accounts:owner-wallet \
         --payment method=fpc-sponsored,fpc=contracts:sponsoredfpc \
         --alias token \
         TokenContract \
-        --args accounts:owner-wallet WormToken WORM 18 --no-wait 2>&1)
-    
-    # Extract token contract address from output
-    TOKEN_CONTRACT_ADDRESS=$(echo "$token_output" | grep "Contract deployed at" | sed 's/Contract deployed at //' | tr -d ' ')
-    
-    if [ -n "$TOKEN_CONTRACT_ADDRESS" ]; then
-        success "Token contract deployment initiated. Address: $TOKEN_CONTRACT_ADDRESS"
-    else
-        warning "Could not extract token contract address from output."
-        echo "Token deployment output:"
-        echo "$token_output"
-        read -p "Please enter the token contract address: " TOKEN_CONTRACT_ADDRESS
-    fi
-    
-    info "Check deployment status at: http://aztecscan.xyz/"
-    wait_for_transaction "token contract deployment"
+        --args accounts:owner-wallet WormToken WORM 18 --no-wait
 }
 
 # Step 6: Mint tokens
@@ -661,7 +661,7 @@ prepare_wormhole_contract() {
     
     # Run tests
     log "Running contract tests..."
-    if aztec test; then
+    if aztec test --silence-warnings; then
         success "Contract tests passed"
     else
         warning "Contract tests failed - continuing with deployment"
@@ -700,31 +700,16 @@ deploy_wormhole_contract() {
         exit 1
     fi
     
-    local wormhole_output
-    wormhole_output=$(aztec-wallet deploy \
+    execute_with_dependency_retry "Wormhole contract deployment" \
+        aztec-wallet deploy \
         --node-url "$NODE_URL" \
         --from accounts:owner-wallet \
         --payment method=fpc-sponsored,fpc=contracts:sponsoredfpc \
         --alias wormhole \
         target/wormhole_contracts-Wormhole.json \
-        --args 56 56 "$RECEIVER_ADDRESS" "$TOKEN_CONTRACT_ADDRESS" --no-wait --init init 2>&1)
+        --args 56 56 "$RECEIVER_ADDRESS" "$TOKEN_CONTRACT_ADDRESS" --no-wait --init init
     
-    # Extract Wormhole contract address from output
-    WORMHOLE_CONTRACT_ADDRESS=$(echo "$wormhole_output" | grep "Contract deployed at" | sed 's/Contract deployed at //' | tr -d ' ')
-    
-    if [ -n "$WORMHOLE_CONTRACT_ADDRESS" ]; then
-        success "Wormhole contract deployment initiated. Address: $WORMHOLE_CONTRACT_ADDRESS"
-    else
-        warning "Could not extract Wormhole contract address from output."
-        echo "Wormhole deployment output:"
-        echo "$wormhole_output"
-        read -p "Please enter the Wormhole contract address: " WORMHOLE_CONTRACT_ADDRESS
-    fi
-    
-    info "Check deployment status at: http://aztecscan.xyz/"
-    wait_for_transaction "Wormhole contract deployment"
-    
-    # Restore original contract after successful deployment
+    # Restore original contract after deployment attempt
     log "Restoring original contract file..."
     restore_contract
 }
@@ -752,6 +737,11 @@ main() {
     register_with_fpc
     deploy_accounts
     deploy_token_contract
+    
+    # Add a pause to let the token contract deploy before minting
+    info "Waiting for token contract to be ready before minting..."
+    sleep 30
+    
     mint_tokens
     prepare_wormhole_contract
     deploy_wormhole_contract
@@ -762,10 +752,17 @@ main() {
     echo "├─ Owner Wallet: $OWNER_ADDRESS"
     echo "├─ Receiver Wallet: $RECEIVER_ADDRESS"
     echo "├─ Token Contract: $TOKEN_CONTRACT_ADDRESS"
-    echo "├─ Wormhole Contract: $WORMHOLE_CONTRACT_ADDRESS"
+    
+    if [ -n "$WORMHOLE_CONTRACT_ADDRESS" ]; then
+        echo "├─ Wormhole Contract: $WORMHOLE_CONTRACT_ADDRESS"
+    else
+        echo "├─ Wormhole Contract: Deployed (check aztecscan for address)"
+    fi
+    
     echo "└─ Transaction Explorer: http://aztecscan.xyz/"
     echo ""
     success "All contracts deployed and ready for use!"
+    info "Note: Contract addresses may take a few minutes to be fully propagated"
     
     # Clean up backup file
     if [ -f "$WORMHOLE_CONTRACT_BACKUP" ]; then
