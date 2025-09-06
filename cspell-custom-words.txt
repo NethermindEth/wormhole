@@ -125,6 +125,7 @@ monad
 Monad
 moonscan
 moretags
+nargo
 Neodyme
 nhooyr
 obsv
@@ -179,6 +180,7 @@ SnaxChain
 solana
 Solana
 Solana's
+sponsoredfpc
 spydk
 Starport
 statesync

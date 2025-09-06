@@ -23,6 +23,7 @@ import (
 
 	"github.com/certusone/wormhole/node/pkg/watchers/algorand"
 	"github.com/certusone/wormhole/node/pkg/watchers/aptos"
+	"github.com/certusone/wormhole/node/pkg/watchers/aztec"
 	"github.com/certusone/wormhole/node/pkg/watchers/evm"
 	"github.com/certusone/wormhole/node/pkg/watchers/near"
 	"github.com/certusone/wormhole/node/pkg/watchers/solana"
@@ -141,6 +142,9 @@ var (
 	aptosRPC     *string
 	aptosAccount *string
 	aptosHandle  *string
+
+	aztecRPC      *string
+	aztecContract *string
 
 	movementRPC     *string
 	movementAccount *string
@@ -383,6 +387,9 @@ func init() {
 	aptosRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "aptosRPC", "Aptos RPC URL", "http://aptos:8080", []string{"http", "https"})
 	aptosAccount = NodeCmd.Flags().String("aptosAccount", "", "aptos account")
 	aptosHandle = NodeCmd.Flags().String("aptosHandle", "", "aptos handle")
+
+	aztecRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "aztecRPC", "Aztec RPC URL", "", []string{"http", "https"})
+	aztecContract = NodeCmd.Flags().String("aztecContract", "", "aztec contract")
 
 	movementRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "movementRPC", "Movement RPC URL", "", []string{"http", "https"})
 	movementAccount = NodeCmd.Flags().String("movementAccount", "", "movement account")
@@ -931,6 +938,10 @@ func runNode(cmd *cobra.Command, args []string) {
 		logger.Fatal("If coinGeckoApiKey is set, then chainGovernorEnabled must be set")
 	}
 
+	if !argsConsistent([]string{*aztecRPC, *aztecContract}) {
+		logger.Fatal("Either --aztecRPC and --aztecContract must all be set or all unset")
+	}
+
 	// NOTE: If this flag isn't set, or the list is empty, Transfer Verifier should not be enabled.
 	if len(*transferVerifierEnabledChainIDs) != 0 {
 		var parseErr error
@@ -1027,6 +1038,7 @@ func runNode(cmd *cobra.Command, args []string) {
 	rpcMap["monadRPC"] = *monadRPC
 	rpcMap["movementRPC"] = *movementRPC
 	rpcMap["mezoRPC"] = *mezoRPC
+	rpcMap["aztecRPC"] = *aztecRPC
 	rpcMap["convergeRPC"] = *convergeRPC
 	rpcMap["plumeRPC"] = *plumeRPC
 
@@ -1625,6 +1637,16 @@ func runNode(cmd *cobra.Command, args []string) {
 			Rpc:       *aptosRPC,
 			Account:   *aptosAccount,
 			Handle:    *aptosHandle,
+		}
+		watcherConfigs = append(watcherConfigs, wc)
+	}
+
+	if shouldStart(aztecRPC) {
+		wc := &aztec.WatcherConfig{
+			NetworkID: "aztec",
+			ChainID:   vaa.ChainIDAztec,
+			Rpc:       *aztecRPC,
+			Contract:  *aztecContract,
 		}
 		watcherConfigs = append(watcherConfigs, wc)
 	}
