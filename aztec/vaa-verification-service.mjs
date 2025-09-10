@@ -7,6 +7,7 @@ import { createPXEService, getPXEServiceConfig } from '@aztec/pxe/server';
 import { createStore } from "@aztec/kv-store/lmdb"
 import { SPONSORED_FPC_SALT } from '@aztec/constants';
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC";
+import { TokenContract } from "@aztec/noir-contracts.js/Token";
 import WormholeJson from "./contracts/target/wormhole_contracts-Wormhole.json" with { type: "json" };
 import { ProxyLogger, captureProfile } from './utils.mjs';
 
@@ -19,15 +20,40 @@ const PORT = process.env.PORT || 3000;
 const NODE_URL = 'https://aztec-alpha-testnet-fullnode.zkv.xyz/';
 const PRIVATE_KEY = '0x9015e46f2e11a7784351ed72fc440d54d06a4a61c88b124f59892b27f9b91301'; // owner-wallet secret key. TODO: change and move to .env
 const CONTRACT_ADDRESS = '0x0848d2af89dfd7c0e171238f9216399e61e908cd31b0222a920f1bf621a16ed6'; // Fresh Wormhole contract
+const TOKEN_ADDRESS = '0x037e5d19d6d27e2fb7c947cfe7c36459e27d35e46dd59f5f47373a64ff491d2c'; // Token contract address
+const RECEIVER_ADDRESS = '0x0d071eec273fa0c82825d9c5d2096965a40bcc33ae942714cf6c683af9632504'; // Receiver address
 const SALT = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Salt used in deployment
 
-let pxe, nodeClient, wormholeContract, paymentMethod, isReady = false;
+let pxe, nodeClient, wormholeContract, tokenContract, paymentMethod, wallet, isReady = false;
+let currentTokenNonce = 0n; // Start with 0 like the working deployment scripts
 
 // Helper function to get the SponsoredFPC instance
 async function getSponsoredFPCInstance() {
   return await getContractInstanceFromDeployParams(SponsoredFPCContract.artifact, {
     salt: new Fr(SPONSORED_FPC_SALT),
   });
+}
+
+// Helper function to prepare payloads from message
+function preparePayloads(message) {
+  const messageBytes = new TextEncoder().encode(message);
+  const PAYLOAD_SIZE = 31;
+  
+  // Create padded bytes for a single payload
+  let paddedBytes = new Array(PAYLOAD_SIZE).fill(0);
+  
+  // Copy the message bytes into the padded array
+  for (let i = 0; i < messageBytes.length && i < PAYLOAD_SIZE; i++) {
+    paddedBytes[i] = messageBytes[i];
+  }
+
+  // Create 8 identical payloads as expected by the contract
+  let payloads = [];
+  for (let i = 0; i < 8; i++) {
+    payloads.push(paddedBytes);
+  }
+  
+  return payloads;
 }
 
 // Initialize Aztec for Testnet
@@ -73,30 +99,46 @@ async function init() {
     });
     paymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
 
-    // Get contract instance from the node (Alex's simpler approach)
-    console.log('🔄 Fetching contract instance from node...');
-    const contractAddress = AztecAddress.fromString(CONTRACT_ADDRESS);
-    const contractInstance = await nodeClient.getContract(contractAddress);
+    // Get Wormhole contract instance from the node (Alex's simpler approach)
+    console.log('🔄 Fetching Wormhole contract instance from node...');
+    const wormholeAddress = AztecAddress.fromString(CONTRACT_ADDRESS);
+    const wormholeInstance = await nodeClient.getContract(wormholeAddress);
     
-    if (!contractInstance) {
-      throw new Error(`Contract instance not found at address ${CONTRACT_ADDRESS}`);
+    if (!wormholeInstance) {
+      throw new Error(`Wormhole contract instance not found at address ${CONTRACT_ADDRESS}`);
     }
     
-    console.log('✅ Contract instance retrieved from node');
-    console.log(`📍 Retrieved contract address: ${contractInstance.address}`);
-    console.log(`📍 Contract class ID: ${contractInstance.currentContractClassId}`);
+    console.log('✅ Wormhole contract instance retrieved from node');
+    console.log(`📍 Retrieved Wormhole contract address: ${wormholeInstance.address}`);
+    console.log(`📍 Wormhole contract class ID: ${wormholeInstance.currentContractClassId}`);
     
-    // Load contract artifact
-    const contractArtifact = loadContractArtifact(WormholeJson);
+    // Get Token contract instance from the node
+    console.log('🔄 Fetching Token contract instance from node...');
+    const tokenAddress = AztecAddress.fromString(TOKEN_ADDRESS);
+    const tokenInstance = await nodeClient.getContract(tokenAddress);
     
-    // Register the contract with PXE (Alex's guidance)
-    console.log('🔄 Registering contract with PXE...');
+    if (!tokenInstance) {
+      throw new Error(`Token contract instance not found at address ${TOKEN_ADDRESS}`);
+    }
+    
+    console.log('✅ Token contract instance retrieved from node');
+    
+    // Load contract artifacts
+    const wormholeArtifact = loadContractArtifact(WormholeJson);
+    
+    // Register contracts with PXE (Alex's guidance)
+    console.log('🔄 Registering contracts with PXE...');
     await pxe.registerContract({
-      instance: contractInstance,
-      artifact: contractArtifact
+      instance: wormholeInstance,
+      artifact: wormholeArtifact
     });
     
-    console.log('✅ Contract registered with PXE');
+    await pxe.registerContract({
+      instance: tokenInstance,
+      artifact: TokenContract.artifact
+    });
+    
+    console.log('✅ Contracts registered with PXE');
     
     // Create account using the deployed owner-wallet credentials
     console.log('🔄 Setting up owner-wallet account...');
@@ -123,19 +165,22 @@ async function init() {
     }
     
     // Get wallet (this should work since the account exists on testnet)
-    const wallet = await schnorrAccount.register();
+    wallet = await schnorrAccount.register();
     console.log(`✅ Using wallet: ${wallet.getAddress()}`);
-    // Now create the contract object
-    console.log(`🔄 Creating contract instance at ${contractAddress.toString()}...`);
-    console.log(`📍 Contract artifact name: ${contractArtifact.name}`);
+    
+    // Create contract objects
+    console.log(`🔄 Creating contract instances...`);
+    console.log(`📍 Wormhole artifact name: ${wormholeArtifact.name}`);
     
     try {
-      wormholeContract = await Contract.at(contractAddress, contractArtifact, wallet);
-      console.log(`✅ Contract instance created successfully`);
-      console.log(`📍 Final contract address: ${wormholeContract.address.toString()}`);
+      wormholeContract = await Contract.at(wormholeAddress, wormholeArtifact, wallet);
+      tokenContract = await Contract.at(tokenAddress, TokenContract.artifact, wallet);
+      console.log(`✅ Contract instances created successfully`);
+      console.log(`📍 Wormhole contract address: ${wormholeContract.address.toString()}`);
+      console.log(`📍 Token contract address: ${tokenContract.address.toString()}`);
       
     } catch (error) {
-      console.error('❌ Failed to create contract instance:', error);
+      console.error('❌ Failed to create contract instances:', error);
       throw error;
     }
     
@@ -156,8 +201,11 @@ app.get('/health', (req, res) => {
     network: 'testnet',
     timestamp: new Date().toISOString(),
     nodeUrl: NODE_URL,
-    contractAddress: CONTRACT_ADDRESS,
-    walletAddress: 'using PXE accounts'
+    wormholeContract: CONTRACT_ADDRESS,
+    tokenContract: TOKEN_ADDRESS,
+    receiverAddress: RECEIVER_ADDRESS,
+    currentTokenNonce: currentTokenNonce.toString(),
+    walletAddress: wallet ? wallet.getAddress().toString() : 'initializing'
   });
 });
 
@@ -225,6 +273,7 @@ app.post('/verify', async (req, res) => {
     });
   }
 });
+
 
 // Test endpoint with Jorge's real Arbitrum Sepolia VAA
 app.post('/test', async (req, res) => {
@@ -328,17 +377,148 @@ app.post('/test', async (req, res) => {
   }
 });
 
+// Test private message publishing endpoint
+app.post('/test-publish', async (req, res) => {
+  console.log('🧪 Testing private message publishing with predefined message on TESTNET');
+  
+  const testMessage = "Hello Wormhole from Aztec Private!";
+  console.log(`📝 Test message: "${testMessage}"`);
+  
+  // Set up request body similar to test VAA endpoint
+  const testReq = { 
+    body: { 
+      message: testMessage,
+      nonce: 123,
+      consistency: 2,
+      messageFee: 1
+    },
+    isTest: true
+  };
+  
+  // Debug contract state before calling publish (same pattern as VAA test)
+  console.log('🔍 Pre-publish debug:');
+  console.log(`   - Service ready: ${isReady}`);
+  console.log(`   - Contract object exists: ${!!wormholeContract}`);
+  console.log(`   - Token contract exists: ${!!tokenContract}`);
+  if (wormholeContract) {
+    console.log(`   - Wormhole contract address: ${wormholeContract.address.toString()}`);
+    console.log(`   - Expected address: ${CONTRACT_ADDRESS}`);
+    console.log(`   - Current token nonce: ${currentTokenNonce}`);
+  }
+  
+  // Call publish logic directly (same pattern as VAA test endpoint)
+  if (!isReady) {
+    return res.status(503).json({ 
+      success: false, 
+      error: 'Service not ready - Aztec testnet connection still initializing' 
+    });
+  }
+
+  try {
+    const { message, nonce, consistency, messageFee } = testReq.body;
+    
+    const publishNonce = nonce || 100;
+    const publishConsistency = consistency || 2;
+    const publishMessageFee = BigInt(messageFee || 1);
+    
+    // Increment the nonce for this transaction (like working blueprint)
+    currentTokenNonce = currentTokenNonce + 1n;
+    const tokenNonceForTestTx = currentTokenNonce;
+    
+    console.log(`📝 Publishing test private message: "${message}"`);
+    console.log(`🔢 Using nonce: ${publishNonce}, consistency: ${publishConsistency}, fee: ${publishMessageFee}`);
+    console.log(`🎫 Token nonce: ${tokenNonceForTestTx}`);
+    
+    const payloads = preparePayloads(message);
+    console.log(`📦 Prepared payloads for test message`);
+    
+    const ownerAddress = wallet.getAddress();
+    const receiverAddress = AztecAddress.fromString(RECEIVER_ADDRESS);
+    
+    console.log('🔐 Creating private transfer authwit for test...');
+    const privateAction = tokenContract.methods.transfer_in_private(
+      ownerAddress,
+      receiverAddress,
+      publishMessageFee,
+      tokenNonceForTestTx
+    );
+    
+    console.log(`${ownerAddress.toString()} is transferring ${publishMessageFee} tokens to ${receiverAddress.toString()} in private (test)`);
+    
+    const wormholeAuthWit = await wallet.createAuthWit(
+      {
+        caller: wormholeContract.address,
+        action: privateAction
+      },
+      true  // Add the 'true' flag like in working blueprint
+    );
+    
+    console.log('✅ Generated Wormhole authwit for test');
+    
+    console.log('🔄 Calling contract method publish_message_in_private for test...');
+    const interaction = wormholeContract.methods.publish_message_in_private(
+      publishNonce,
+      payloads,
+      publishMessageFee,
+      publishConsistency,
+      ownerAddress,
+      tokenNonceForTestTx
+    );
+    
+    console.log('🔄 Capturing test interaction profile...');
+    await captureProfile('publish_message_in_private_test', interaction);
+    
+    console.log('🔄 Sending test private message transaction...');
+    const tx = await interaction.send({ 
+      authWitnesses: [wormholeAuthWit],
+      fee: { paymentMethod } 
+    }).wait();
+    
+    console.log(`✅ Test private message published successfully on TESTNET: ${tx.txHash}`);
+    
+    res.json({
+      success: true,
+      network: 'testnet',
+      txHash: tx.txHash,
+      wormholeContract: CONTRACT_ADDRESS,
+      tokenContract: TOKEN_ADDRESS,
+      message: `TEST: Private message "${message}" published successfully on Aztec testnet`,
+      nonce: publishNonce,
+      consistency: publishConsistency,
+      messageFee: publishMessageFee.toString(),
+      tokenNonce: tokenNonceForTestTx.toString(),
+      isTest: true,
+      processedAt: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Test private message publishing failed on TESTNET:', error.message);
+    console.error('❌ Full error:', error);
+    res.status(500).json({
+      success: false,
+      network: 'testnet',
+      error: error.message,
+      isTest: true,
+      processedAt: new Date().toISOString()
+    });
+  }
+});
+
 // Start server
 init().then(() => {
   app.listen(PORT, () => {
-    console.log(`🚀 VAA Verification Service running on port ${PORT}`);
+    console.log(`🚀 VAA Verification & Private Message Service running on port ${PORT}`);
     console.log(`🌐 Network: TESTNET`);
     console.log(`📡 Node: ${NODE_URL}`);
-    console.log(`📄 Contract: ${CONTRACT_ADDRESS}`);
+    console.log(`📄 Wormhole Contract: ${CONTRACT_ADDRESS}`);
+    console.log(`🪙 Token Contract: ${TOKEN_ADDRESS}`);
+    console.log(`📮 Receiver Address: ${RECEIVER_ADDRESS}`);
     console.log('Available endpoints:');
     console.log('  GET  /health - Health check');
     console.log('  POST /verify - Verify VAA on testnet');
     console.log('  POST /test   - Test with Jorge\'s real Arbitrum Sepolia VAA');
+    console.log('  POST /publish - Publish private message');
+    console.log('  POST /test-publish - Test private message publishing');
   });
 }).catch(error => {
   console.error('❌ Failed to start testnet service:', error);
