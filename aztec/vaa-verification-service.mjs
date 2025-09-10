@@ -465,8 +465,8 @@ app.post('/test-publish', async (req, res) => {
       tokenNonceForTestTx
     );
     
-    console.log('🔄 Capturing test interaction profile...');
-    await captureProfile('publish_message_in_private_test', interaction);
+    //console.log('🔄 Capturing test interaction profile...');
+    //await captureProfile('publish_message_in_private', interaction);
     
     console.log('🔄 Sending test private message transaction...');
     const tx = await interaction.send({ 
