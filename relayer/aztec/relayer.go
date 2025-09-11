@@ -170,17 +170,17 @@ type Config struct {
 // NewConfigFromEnv creates a Config from environment variables
 func NewConfigFromEnv() Config {
 	return Config{
-		SpyRPCHost:             getEnvOrDefault("SPY_RPC_HOST", "localhost:7072"),
+		SpyRPCHost:             getEnvOrDefault("SPY_RPC_HOST", "localhost:7073"),
 		SourceChainID:          uint16(getEnvIntOrDefault("SOURCE_CHAIN_ID", 56)), // Aztec
 		DestChainID:            uint16(getEnvIntOrDefault("DEST_CHAIN_ID", 2)),    // Arbitrum
 		AztecPXEURL:            getEnvOrDefault("AZTEC_PXE_URL", "http://localhost:8090"),
 		AztecWalletAddress:     getEnvOrDefault("AZTEC_WALLET_ADDRESS", "0x1f3933ca4d66e948ace5f8339e5da687993b76ee57bcf65e82596e0fc10a8859"),
 		ArbitrumRPCURL:         getEnvOrDefault("ARBITRUM_RPC_URL", "http://localhost:8545"),
 		PrivateKey:             getEnvOrDefault("PRIVATE_KEY", "0x0ff5c4c050588f4614255a5a4f800215b473e442ae9984347b3a727c3bb7ca55"),
-		WormholeContract:       getEnvOrDefault("WORMHOLE_CONTRACT", "0x1b35884f8ba9371419d00ae228da9ff839edfe8fe6a804fdfcd430e0dc7e40db"),
+		WormholeContract:       getEnvOrDefault("WORMHOLE_CONTRACT", "0x0848d2af89dfd7c0e171238f9216399e61e908cd31b0222a920f1bf621a16ed6"),
 		AztecTargetContract:    getEnvOrDefault("AZTEC_TARGET_CONTRACT", "0x0848d2af89dfd7c0e171238f9216399e61e908cd31b0222a920f1bf621a16ed6"),
 		ArbitrumTargetContract: getEnvOrDefault("ARBITRUM_TARGET_CONTRACT", "0x009cbB8f91d392856Cb880d67c806Aa731E3d686"),
-		EmitterAddress:         getEnvOrDefault("EMITTER_ADDRESS", "0d6fe810321185c97a0e94200f998bcae787aaddf953a03b14ec5da3b6838bad"),
+		EmitterAddress:         getEnvOrDefault("EMITTER_ADDRESS", "0x0848d2af89dfd7c0e171238f9216399e61e908cd31b0222a920f1bf621a16ed6"),
 		VerificationServiceURL: getEnvOrDefault("VERIFICATION_SERVICE_URL", "http://localhost:8080"), // ADD
 	}
 }
@@ -237,10 +237,30 @@ func (c *SpyClient) SubscribeSignedVAA(ctx context.Context) (spyv1.SpyRPCService
 	var err error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		stream, err = c.client.SubscribeSignedVAA(ctx, &spyv1.SubscribeSignedVAARequest{})
+		// Create a fresh connection for each attempt (like test_spy.go)
+		endpoint := c.conn.Target()
+		conn, err := grpc.DialContext(ctx, endpoint,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithBlock())
+		if err != nil {
+			if attempt < maxRetries {
+				c.logger.Warn("Connection attempt failed",
+					zap.Int("attempt", attempt),
+					zap.Error(err),
+					zap.Duration("retryIn", retryDelay))
+				time.Sleep(retryDelay)
+				continue
+			}
+			return nil, fmt.Errorf("failed to create connection after %d attempts: %v", maxRetries, err)
+		}
+
+		client := spyv1.NewSpyRPCServiceClient(conn)
+		stream, err = client.SubscribeSignedVAA(ctx, &spyv1.SubscribeSignedVAARequest{})
 		if err == nil {
 			return stream, nil
 		}
+
+		conn.Close() // Close the failed connection
 
 		if attempt < maxRetries {
 			c.logger.Warn("Subscribe attempt failed",
@@ -252,12 +272,12 @@ func (c *SpyClient) SubscribeSignedVAA(ctx context.Context) (spyv1.SpyRPCService
 			case <-time.After(retryDelay):
 				// Continue to next retry
 			case <-ctx.Done():
-				return nil, fmt.Errorf("subscribe to signed VAAs: %v", ctx.Err())
+				return nil, fmt.Errorf("context cancelled during retry: %v", ctx.Err())
 			}
 		}
 	}
 
-	return nil, fmt.Errorf("subscribe to signed VAAs after %d attempts: %v", maxRetries, err)
+	return nil, fmt.Errorf("failed to subscribe after %d attempts: %v", maxRetries, err)
 }
 
 // AztecPXEClient handles interactions with Aztec blockchain via PXE
