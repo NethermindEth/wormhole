@@ -10,6 +10,9 @@ import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC";
 import { TokenContract } from "@aztec/noir-contracts.js/Token";
 import WormholeJson from "./contracts/target/wormhole_contracts-Wormhole.json" with { type: "json" };
 import { ProxyLogger, captureProfile } from './utils.mjs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 const app = express();
 app.use(express.json());
@@ -25,7 +28,132 @@ const RECEIVER_ADDRESS = '0x0d071eec273fa0c82825d9c5d2096965a40bcc33ae942714cf6c
 const SALT = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Salt used in deployment
 
 let pxe, nodeClient, wormholeContract, tokenContract, paymentMethod, wallet, isReady = false;
-let currentTokenNonce = 0n; // Start with 0 like the working deployment scripts
+let currentTokenNonce = 0n;
+let currentWalletNonce = 100n; // Starting wallet nonce
+
+// Nonce management functions
+// Get the directory of the current module (ES module equivalent of __dirname)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Try multiple possible paths for nonce.json
+const possiblePaths = [
+  join(process.cwd(), 'packages', 'deploy', 'src', 'nonce.json'), // When running from aztec/
+  join(process.cwd(), 'aztec', 'packages', 'deploy', 'src', 'nonce.json'), // When running from project root
+  join(__dirname, 'packages', 'deploy', 'src', 'nonce.json'), // Relative to script location
+];
+
+function findNonceFilePath() {
+  for (const path of possiblePaths) {
+    if (existsSync(path)) {
+      console.log(`📄 Found nonce file at: ${path}`);
+      return path;
+    }
+  }
+  console.log('📄 No nonce file found in any expected location');
+  console.log('📄 Tried paths:', possiblePaths);
+  return possiblePaths[0]; // Return first path as default
+}
+
+const NONCE_FILE_PATH = findNonceFilePath();
+
+function loadNoncesFromFile() {
+  try {
+    if (existsSync(NONCE_FILE_PATH)) {
+      const nonceData = JSON.parse(readFileSync(NONCE_FILE_PATH, 'utf8'));
+      const tokenNonce = nonceData.token_nonce ? BigInt(nonceData.token_nonce) : 0n;
+      const walletNonce = nonceData.wallet_nonce ? BigInt(nonceData.wallet_nonce) : 100n;
+      console.log(`📄 Loaded nonces from file - Token: ${tokenNonce}, Wallet: ${walletNonce}`);
+      return { tokenNonce, walletNonce };
+    } else {
+      console.log('📄 No nonce file found, starting with default nonces');
+      return { tokenNonce: 0n, walletNonce: 100n };
+    }
+  } catch (error) {
+    console.error('❌ Error loading nonces from file:', error);
+    return { tokenNonce: 0n, walletNonce: 100n };
+  }
+}
+
+function saveNoncesToFile(tokenNonce, walletNonce) {
+  try {
+    const nonceData = { 
+      token_nonce: tokenNonce.toString(),
+      wallet_nonce: walletNonce.toString()
+    };
+    writeFileSync(NONCE_FILE_PATH, JSON.stringify(nonceData, null, 2));
+    console.log(`💾 Saved nonces to file - Token: ${tokenNonce}, Wallet: ${walletNonce}`);
+  } catch (error) {
+    console.error('❌ Error saving nonces to file:', error);
+    throw error;
+  }
+}
+
+function getNextTokenNonce() {
+  currentTokenNonce = currentTokenNonce + 1n;
+  saveNoncesToFile(currentTokenNonce, currentWalletNonce);
+  return currentTokenNonce;
+}
+
+function getNextWalletNonce() {
+  currentWalletNonce = currentWalletNonce + 1n;
+  saveNoncesToFile(currentTokenNonce, currentWalletNonce);
+  return currentWalletNonce;
+}
+
+function validateTokenNonce(nonce) {
+  if (nonce <= currentTokenNonce) {
+    throw new Error(`Token nonce ${nonce} is not greater than current token nonce ${currentTokenNonce}. This will cause existingnullifier errors.`);
+  }
+  return true;
+}
+
+function validateWalletNonce(nonce) {
+  if (nonce <= currentWalletNonce) {
+    throw new Error(`Wallet nonce ${nonce} is not greater than current wallet nonce ${currentWalletNonce}. This will cause existingnullifier errors.`);
+  }
+  return true;
+}
+
+function recoverNoncesFromFile() {
+  console.log('🔄 Recovering nonces from file...');
+  const { tokenNonce, walletNonce } = loadNoncesFromFile();
+  let updated = false;
+  
+  if (tokenNonce > currentTokenNonce) {
+    console.log(`📈 Updating token nonce from ${currentTokenNonce} to ${tokenNonce}`);
+    currentTokenNonce = tokenNonce;
+    updated = true;
+  }
+  
+  if (walletNonce > currentWalletNonce) {
+    console.log(`📈 Updating wallet nonce from ${currentWalletNonce} to ${walletNonce}`);
+    currentWalletNonce = walletNonce;
+    updated = true;
+  }
+  
+  if (!updated) {
+    console.log(`📄 File nonces are not greater than current nonces`);
+  }
+  
+  return { tokenNonce: currentTokenNonce, walletNonce: currentWalletNonce };
+}
+
+function handleNonceError(error) {
+  if (error.message.includes('existingnullifier') || error.message.includes('Existing nullifier')) {
+    console.error('🚨 Nonce conflict detected! Attempting recovery...');
+    try {
+      const recovered = recoverNoncesFromFile();
+      console.log('✅ Nonces recovered from file');
+      console.log(`   Token nonce: ${recovered.tokenNonce}, Wallet nonce: ${recovered.walletNonce}`);
+      return true; // Indicates recovery was attempted
+    } catch (recoveryError) {
+      console.error('❌ Nonce recovery failed:', recoveryError);
+      return false;
+    }
+  }
+  return false;
+}
 
 // Helper function to get the SponsoredFPC instance
 async function getSponsoredFPCInstance() {
@@ -59,6 +187,12 @@ function preparePayloads(message) {
 // Initialize Aztec for Testnet
 async function init() {
   console.log('🔄 Initializing Aztec TESTNET connection...');
+  
+  // Load nonces from file first
+  const { tokenNonce, walletNonce } = loadNoncesFromFile();
+  currentTokenNonce = tokenNonce;
+  currentWalletNonce = walletNonce;
+  console.log(`🎫 Initialized with nonces - Token: ${currentTokenNonce}, Wallet: ${currentWalletNonce}`);
   
   if (!PRIVATE_KEY) {
     throw new Error('PRIVATE_KEY environment variable is required for testnet');
@@ -205,8 +339,59 @@ app.get('/health', (req, res) => {
     tokenContract: TOKEN_ADDRESS,
     receiverAddress: RECEIVER_ADDRESS,
     currentTokenNonce: currentTokenNonce.toString(),
+    currentWalletNonce: currentWalletNonce.toString(),
     walletAddress: wallet ? wallet.getAddress().toString() : 'initializing'
   });
+});
+
+// Nonce status endpoint
+app.get('/nonce-status', (req, res) => {
+  try {
+    const { tokenNonce, walletNonce } = loadNoncesFromFile();
+    const tokenInSync = tokenNonce === currentTokenNonce;
+    const walletInSync = walletNonce === currentWalletNonce;
+    
+    res.json({
+      success: true,
+      currentTokenNonce: currentTokenNonce.toString(),
+      currentWalletNonce: currentWalletNonce.toString(),
+      fileTokenNonce: tokenNonce.toString(),
+      fileWalletNonce: walletNonce.toString(),
+      tokenInSync: tokenInSync,
+      walletInSync: walletInSync,
+      allInSync: tokenInSync && walletInSync,
+      nonceFilePath: NONCE_FILE_PATH,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Nonce recovery endpoint
+app.post('/recover-nonce', (req, res) => {
+  try {
+    const recovered = recoverNoncesFromFile();
+    res.json({
+      success: true,
+      message: 'Nonces recovered from file',
+      previousTokenNonce: currentTokenNonce.toString(),
+      previousWalletNonce: currentWalletNonce.toString(),
+      recoveredTokenNonce: recovered.tokenNonce.toString(),
+      recoveredWalletNonce: recovered.walletNonce.toString(),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Verify VAA
@@ -388,7 +573,7 @@ app.post('/test-publish', async (req, res) => {
   const testReq = { 
     body: { 
       message: testMessage,
-      nonce: 123,
+      nonce: 99999,
       consistency: 2,
       messageFee: 1
     },
@@ -417,16 +602,16 @@ app.post('/test-publish', async (req, res) => {
   try {
     const { message, nonce, consistency, messageFee } = testReq.body;
     
-    const publishNonce = nonce || 100;
+    // Get next wallet nonce for the wormhole message
+    const publishNonce = getNextWalletNonce();
     const publishConsistency = consistency || 2;
     const publishMessageFee = BigInt(messageFee || 1);
     
-    // Increment the nonce for this transaction (like working blueprint)
-    currentTokenNonce = currentTokenNonce + 1n;
-    const tokenNonceForTestTx = currentTokenNonce;
+    // Get next token nonce for the token transfer
+    const tokenNonceForTestTx = getNextTokenNonce();
     
     console.log(`📝 Publishing test private message: "${message}"`);
-    console.log(`🔢 Using nonce: ${publishNonce}, consistency: ${publishConsistency}, fee: ${publishMessageFee}`);
+    console.log(`🔢 Using wallet nonce: ${publishNonce}, consistency: ${publishConsistency}, fee: ${publishMessageFee}`);
     console.log(`🎫 Token nonce: ${tokenNonceForTestTx}`);
     
     const payloads = preparePayloads(message);
@@ -494,11 +679,124 @@ app.post('/test-publish', async (req, res) => {
   } catch (error) {
     console.error('❌ Test private message publishing failed on TESTNET:', error.message);
     console.error('❌ Full error:', error);
+    
+    // Handle nonce-related errors
+    const recoveryAttempted = handleNonceError(error);
+    
     res.status(500).json({
       success: false,
       network: 'testnet',
       error: error.message,
       isTest: true,
+      recoveryAttempted: recoveryAttempted,
+      processedAt: new Date().toISOString()
+    });
+  }
+});
+
+// Publish private message endpoint (production version)
+app.post('/publish', async (req, res) => {
+  console.log('📝 Publishing private message on TESTNET');
+  
+  if (!isReady) {
+    return res.status(503).json({ 
+      success: false, 
+      error: 'Service not ready - Aztec testnet connection still initializing' 
+    });
+  }
+
+  try {
+    const { message, nonce, consistency, messageFee } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({
+        success: false,
+        error: 'message is required'
+      });
+    }
+    
+    // Get next wallet nonce for the wormhole message
+    const publishNonce = getNextWalletNonce();
+    const publishConsistency = consistency || 2;
+    const publishMessageFee = BigInt(messageFee || 1);
+    
+    // Get next token nonce for the token transfer
+    const tokenNonceForTestTx = getNextTokenNonce();
+    
+    console.log(`📝 Publishing private message: "${message}"`);
+    console.log(`🔢 Using wallet nonce: ${publishNonce}, consistency: ${publishConsistency}, fee: ${publishMessageFee}`);
+    console.log(`🎫 Token nonce: ${tokenNonceForTestTx}`);
+    
+    const payloads = preparePayloads(message);
+    console.log(`📦 Prepared payloads for message`);
+    
+    const ownerAddress = wallet.getAddress();
+    const receiverAddress = AztecAddress.fromString(RECEIVER_ADDRESS);
+    
+    console.log('🔐 Creating private transfer authwit...');
+    const privateAction = tokenContract.methods.transfer_in_private(
+      ownerAddress,
+      receiverAddress,
+      publishMessageFee,
+      tokenNonceForTestTx
+    );
+    
+    console.log(`${ownerAddress.toString()} is transferring ${publishMessageFee} tokens to ${receiverAddress.toString()} in private`);
+    
+    const wormholeAuthWit = await wallet.createAuthWit(
+      {
+        caller: wormholeContract.address,
+        action: privateAction
+      },
+      true
+    );
+    
+    console.log('✅ Generated Wormhole authwit');
+    
+    console.log('🔄 Calling contract method publish_message_in_private...');
+    const interaction = wormholeContract.methods.publish_message_in_private(
+      publishNonce,
+      payloads,
+      publishMessageFee,
+      publishConsistency,
+      ownerAddress,
+      tokenNonceForTestTx
+    );
+    
+    console.log('🔄 Sending private message transaction...');
+    const tx = await interaction.send({ 
+      authWitnesses: [wormholeAuthWit],
+      fee: { paymentMethod } 
+    }).wait();
+    
+    console.log(`✅ Private message published successfully on TESTNET: ${tx.txHash}`);
+    
+    res.json({
+      success: true,
+      network: 'testnet',
+      txHash: tx.txHash,
+      wormholeContract: CONTRACT_ADDRESS,
+      tokenContract: TOKEN_ADDRESS,
+      message: `Private message "${message}" published successfully on Aztec testnet`,
+      nonce: publishNonce,
+      consistency: publishConsistency,
+      messageFee: publishMessageFee.toString(),
+      tokenNonce: tokenNonceForTestTx.toString(),
+      processedAt: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Private message publishing failed on TESTNET:', error.message);
+    console.error('❌ Full error:', error);
+    
+    // Handle nonce-related errors
+    const recoveryAttempted = handleNonceError(error);
+    
+    res.status(500).json({
+      success: false,
+      network: 'testnet',
+      error: error.message,
+      recoveryAttempted: recoveryAttempted,
       processedAt: new Date().toISOString()
     });
   }
@@ -515,9 +813,11 @@ init().then(() => {
     console.log(`📮 Receiver Address: ${RECEIVER_ADDRESS}`);
     console.log('Available endpoints:');
     console.log('  GET  /health - Health check');
+    console.log('  GET  /nonce-status - Check nonce synchronization status');
+    console.log('  POST /recover-nonce - Recover nonce from file');
     console.log('  POST /verify - Verify VAA on testnet');
     console.log('  POST /test   - Test with Jorge\'s real Arbitrum Sepolia VAA');
-    console.log('  POST /publish - Publish private message');
+    console.log('  POST /publish - Publish private message (production)');
     console.log('  POST /test-publish - Test private message publishing');
   });
 }).catch(error => {

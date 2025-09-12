@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	v1 "github.com/certusone/wormhole/node/pkg/proto/publicrpc/v1"
 	spyv1 "github.com/certusone/wormhole/node/pkg/proto/spy/v1"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -170,18 +171,20 @@ type Config struct {
 // NewConfigFromEnv creates a Config from environment variables
 func NewConfigFromEnv() Config {
 	return Config{
-		SpyRPCHost:             getEnvOrDefault("SPY_RPC_HOST", "localhost:7073"),
-		SourceChainID:          uint16(getEnvIntOrDefault("SOURCE_CHAIN_ID", 56)), // Aztec
-		DestChainID:            uint16(getEnvIntOrDefault("DEST_CHAIN_ID", 2)),    // Arbitrum
-		AztecPXEURL:            getEnvOrDefault("AZTEC_PXE_URL", "http://localhost:8090"),
+		SpyRPCHost:       getEnvOrDefault("SPY_RPC_HOST", "localhost:7073"),
+		SourceChainID:    uint16(getEnvIntOrDefault("SOURCE_CHAIN_ID", 56)),  // Aztec
+		DestChainID:      uint16(getEnvIntOrDefault("DEST_CHAIN_ID", 10003)), // Arbitrum Sepolia (TODO: verify this works)
+		WormholeContract: getEnvOrDefault("WORMHOLE_CONTRACT", "0x0848d2af89dfd7c0e171238f9216399e61e908cd31b0222a920f1bf621a16ed6"),
+		EmitterAddress:   getEnvOrDefault("EMITTER_ADDRESS", "0x0848d2af89dfd7c0e171238f9216399e61e908cd31b0222a920f1bf621a16ed6"),
+		// Needed when sending to Arbitrum
 		AztecWalletAddress:     getEnvOrDefault("AZTEC_WALLET_ADDRESS", "0x1f3933ca4d66e948ace5f8339e5da687993b76ee57bcf65e82596e0fc10a8859"),
-		ArbitrumRPCURL:         getEnvOrDefault("ARBITRUM_RPC_URL", "http://localhost:8545"),
+		ArbitrumRPCURL:         getEnvOrDefault("ARBITRUM_RPC_URL", "https://sepolia-rollup.arbitrum.io/rpc"),
 		PrivateKey:             getEnvOrDefault("PRIVATE_KEY", "0x0ff5c4c050588f4614255a5a4f800215b473e442ae9984347b3a727c3bb7ca55"),
-		WormholeContract:       getEnvOrDefault("WORMHOLE_CONTRACT", "0x0848d2af89dfd7c0e171238f9216399e61e908cd31b0222a920f1bf621a16ed6"),
+		ArbitrumTargetContract: getEnvOrDefault("ARBITRUM_TARGET_CONTRACT", "0x248EC2E5595480fF371031698ae3a4099b8dC229"),
+		// Needed when sending to Aztec
+		AztecPXEURL:            getEnvOrDefault("AZTEC_PXE_URL", "http://localhost:8090"),
 		AztecTargetContract:    getEnvOrDefault("AZTEC_TARGET_CONTRACT", "0x0848d2af89dfd7c0e171238f9216399e61e908cd31b0222a920f1bf621a16ed6"),
-		ArbitrumTargetContract: getEnvOrDefault("ARBITRUM_TARGET_CONTRACT", "0x009cbB8f91d392856Cb880d67c806Aa731E3d686"),
-		EmitterAddress:         getEnvOrDefault("EMITTER_ADDRESS", "0x0848d2af89dfd7c0e171238f9216399e61e908cd31b0222a920f1bf621a16ed6"),
-		VerificationServiceURL: getEnvOrDefault("VERIFICATION_SERVICE_URL", "http://localhost:8080"), // ADD
+		VerificationServiceURL: getEnvOrDefault("VERIFICATION_SERVICE_URL", "http://localhost:8080"),
 	}
 }
 
@@ -226,8 +229,8 @@ func (c *SpyClient) Close() {
 	}
 }
 
-// SubscribeSignedVAA subscribes to all signed VAAs with retry logic
-func (c *SpyClient) SubscribeSignedVAA(ctx context.Context) (spyv1.SpyRPCService_SubscribeSignedVAAClient, error) {
+// SubscribeSignedVAA subscribes to signed VAAs with retry logic and optional filtering
+func (c *SpyClient) SubscribeSignedVAA(ctx context.Context, filters []*spyv1.FilterEntry) (spyv1.SpyRPCService_SubscribeSignedVAAClient, error) {
 	const maxRetries = 5
 	const retryDelay = 2 * time.Second
 
@@ -237,7 +240,7 @@ func (c *SpyClient) SubscribeSignedVAA(ctx context.Context) (spyv1.SpyRPCService
 	var err error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Create a fresh connection for each attempt (like test_spy.go)
+		// Create a fresh connection for each attempt
 		endpoint := c.conn.Target()
 		conn, err := grpc.DialContext(ctx, endpoint,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -255,7 +258,9 @@ func (c *SpyClient) SubscribeSignedVAA(ctx context.Context) (spyv1.SpyRPCService
 		}
 
 		client := spyv1.NewSpyRPCServiceClient(conn)
-		stream, err = client.SubscribeSignedVAA(ctx, &spyv1.SubscribeSignedVAARequest{})
+		stream, err = client.SubscribeSignedVAA(ctx, &spyv1.SubscribeSignedVAARequest{
+			Filters: filters,
+		})
 		if err == nil {
 			return stream, nil
 		}
@@ -272,12 +277,12 @@ func (c *SpyClient) SubscribeSignedVAA(ctx context.Context) (spyv1.SpyRPCService
 			case <-time.After(retryDelay):
 				// Continue to next retry
 			case <-ctx.Done():
-				return nil, fmt.Errorf("context cancelled during retry: %v", ctx.Err())
+				return nil, fmt.Errorf("subscribe to signed VAAs: %v", ctx.Err())
 			}
 		}
 	}
 
-	return nil, fmt.Errorf("failed to subscribe after %d attempts: %v", maxRetries, err)
+	return nil, fmt.Errorf("subscribe to signed VAAs after %d attempts: %v", maxRetries, err)
 }
 
 // AztecPXEClient handles interactions with Aztec blockchain via PXE
@@ -613,13 +618,27 @@ func (r *Relayer) Start(ctx context.Context) error {
 	// Create a wait group to track goroutines
 	var wg sync.WaitGroup
 
-	// Subscribe to VAAs
-	stream, err := r.spyClient.SubscribeSignedVAA(ctx)
+	// Subscribe to Aztec VAAs only using spy-level filtering
+	// This uses spy-level filtering with Aztec parameters
+	filters := []*spyv1.FilterEntry{
+		{
+			Filter: &spyv1.FilterEntry_EmitterFilter{
+				EmitterFilter: &spyv1.EmitterFilter{
+					ChainId:        v1.ChainID(r.config.SourceChainID),                // Aztec (56)
+					EmitterAddress: strings.TrimPrefix(r.config.EmitterAddress, "0x"), // Aztec emitter without 0x
+				},
+			},
+		},
+	}
+
+	stream, err := r.spyClient.SubscribeSignedVAA(ctx, filters)
 	if err != nil {
 		return fmt.Errorf("subscribe to VAA stream: %v", err)
 	}
 
-	r.logger.Info("Listening for VAAs")
+	r.logger.Info("🎯 USING SPY-LEVEL FILTERING with Aztec",
+		zap.Uint16("aztecChain", r.config.SourceChainID),
+		zap.String("aztecEmitter", strings.TrimPrefix(r.config.EmitterAddress, "0x")))
 
 	// Create a separate context for graceful shutdown
 	processingCtx, cancelProcessing := context.WithCancel(context.Background())
@@ -642,7 +661,7 @@ func (r *Relayer) Start(ctx context.Context) error {
 			if err != nil {
 				r.logger.Warn("Stream error, retrying in 5s", zap.Error(err))
 				time.Sleep(5 * time.Second)
-				stream, err = r.spyClient.SubscribeSignedVAA(ctx)
+				stream, err = r.spyClient.SubscribeSignedVAA(ctx, nil)
 				if err != nil {
 					// Cancel all processing before returning
 					cancelProcessing()
@@ -706,6 +725,13 @@ func (r *Relayer) processVAA(ctx context.Context, vaaBytes []byte) {
 		zap.String("emitter", vaaData.EmitterHex),
 		zap.String("sourceTxID", vaaData.TxID))
 
+	// Debug: Log Aztec VAAs (spy-level filtering should only send us Aztec VAAs)
+	if vaaData.ChainID == r.config.SourceChainID { // Aztec
+		r.logger.Info("🎯 AZTEC VAA RECEIVED! (Spy-level filtering working)",
+			zap.String("emitter", vaaData.EmitterHex),
+			zap.Uint64("sequence", vaaData.Sequence))
+	}
+
 	// Use the passed context when calling the processor
 	if err := r.vaaProcessor(r, vaaData); err != nil {
 		r.logger.Error("Error processing VAA", zap.Error(err))
@@ -739,40 +765,24 @@ func defaultVAAProcessor(r *Relayer, vaaData *VAAData) error {
 	var err error
 	var direction string
 
-	// Check if this is a VAA from Aztec (source chain) -> send to Arbitrum
-	if vaaData.ChainID == r.config.SourceChainID {
-		direction = "Aztec->Arbitrum"
+	// Process Aztec VAAs (spy-level filtering should only send us Aztec VAAs)
+	// Since spy-level filtering is working, we should only receive Aztec VAAs
+	if vaaData.ChainID == r.config.SourceChainID { // Aztec
+		direction = "Aztec->Arbitrum (SPY FILTERED)"
 
-		r.logger.Info("Processing VAA from Aztec to Arbitrum",
+		r.logger.Info("🎯 PROCESSING AZTEC VAA! (Spy-level filtering successful)",
 			zap.Uint64("sequence", vaaData.Sequence),
-			zap.String("sourceTxID", vaaData.TxID))
+			zap.String("sourceTxID", vaaData.TxID),
+			zap.String("emitter", vaaData.EmitterHex))
 
 		// Send to Arbitrum using EVM client
 		txHash, err = r.evmClient.SendVerifyTransaction(ctx, r.config.ArbitrumTargetContract, vaaData.RawBytes)
 
-		// Check if this is a VAA from Arbitrum (dest chain) -> send to Aztec
-	} else if vaaData.ChainID == r.config.DestChainID {
-		direction = "Arbitrum->Aztec"
-
-		r.logger.Info("Processing VAA from Arbitrum to Aztec",
-			zap.Uint64("sequence", vaaData.Sequence),
-			zap.String("sourceTxID", vaaData.TxID))
-
-		// MODIFY: Try verification service first, fallback to direct PXE
-		txHash, err = r.verificationClient.VerifyVAA(ctx, vaaData.RawBytes)
-		if err != nil {
-			r.logger.Warn("Verification service failed, trying direct PXE", zap.Error(err))
-			// Fallback to direct PXE call
-			txHash, err = r.aztecClient.SendVerifyTransaction(ctx, r.config.AztecTargetContract, vaaData.RawBytes)
-		} else {
-			r.logger.Debug("Used verification service successfully")
-		}
-
 	} else {
-		// Skip VAAs not from our configured chains
-		r.logger.Debug("Skipping VAA (not from configured chains)",
-			zap.Uint64("sequence", vaaData.Sequence),
-			zap.Uint16("chain", vaaData.ChainID))
+		// This should not happen with spy-level filtering, but log it for debugging
+		r.logger.Warn("Unexpected VAA received (not Aztec)",
+			zap.Uint16("chain", vaaData.ChainID),
+			zap.Uint64("sequence", vaaData.Sequence))
 		return nil
 	}
 
