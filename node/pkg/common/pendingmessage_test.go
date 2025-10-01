@@ -3,6 +3,8 @@ package common_test
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"math/rand/v2"
@@ -16,33 +18,6 @@ import (
 	"github.com/wormhole-foundation/wormhole/sdk"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 )
-
-func TestPendingMessageQueue_Push(t *testing.T) {
-	tests := []struct { // description of this test case
-		name string
-		msg  *common.PendingMessage
-	}{
-		{
-			"single message",
-			makeUniquePendingMessage(t),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Set-up
-			q := common.NewPendingMessageQueue()
-
-			require.Equal(t, 0, q.Len())
-			require.Nil(t, q.Peek())
-
-			q.Push(tt.msg)
-
-			require.Equal(t, 1, q.Len())
-			// Ensure the first message is at the top of the queue
-			require.Equal(t, tt.msg, q.Peek())
-		})
-	}
-}
 
 func TestPendingMessage_RoundTripMarshal(t *testing.T) {
 	orig := makeUniquePendingMessage(t)
@@ -60,9 +35,9 @@ func TestPendingMessage_RoundTripMarshal(t *testing.T) {
 func TestPendingMessage_MarshalError(t *testing.T) {
 
 	type test struct {
-		label  string
-		input  common.MessagePublication
-		errMsg string
+		label string
+		input common.MessagePublication
+		err   error
 	}
 
 	// Set up.
@@ -80,7 +55,7 @@ func TestPendingMessage_MarshalError(t *testing.T) {
 			input: common.MessagePublication{
 				TxID: longTxID.Bytes(),
 			},
-			errMsg: "wrong size: TxID too long",
+			err: common.ErrInputSize{Msg: "TxID too long"},
 		},
 		{
 			label: "txID too short",
@@ -96,7 +71,7 @@ func TestPendingMessage_MarshalError(t *testing.T) {
 				Unreliable:       true,
 				IsReobservation:  true,
 			},
-			errMsg: "wrong size: TxID too short",
+			err: common.ErrInputSize{Msg: "TxID too short"},
 		},
 	}
 
@@ -108,7 +83,8 @@ func TestPendingMessage_MarshalError(t *testing.T) {
 			}
 
 			bz, writeErr := pMsg.MarshalBinary()
-			require.ErrorContains(t, writeErr, tc.errMsg)
+			require.Error(t, writeErr)
+			require.True(t, errors.Is(writeErr, tc.err), fmt.Sprintf("got wrong error type: %v", writeErr))
 			require.Nil(t, bz)
 		})
 	}
@@ -129,7 +105,7 @@ func TestPendingMessageQueue_NoDuplicates(t *testing.T) {
 	msg2.ReleaseTime = msg1.ReleaseTime.Add(time.Hour)
 	require.True(t, msg1.ReleaseTime.Before(msg2.ReleaseTime))
 
-	// Pushing two messages with the same Message ID should not add a duplicate.
+	// Pushing the same message twice should not add it to the queue.
 	q.Push(&msg2)
 	require.Equal(t, 1, q.Len())
 }
@@ -195,7 +171,7 @@ func TestPendingMessage_HeapInvariants(t *testing.T) {
 			}
 			require.Equal(t, len(tt.order), q.Len())
 
-			removed, err := q.RemoveItem(msg2.Msg.MessageID())
+			removed, err := q.RemoveItem(&msg2.Msg)
 			require.NoError(t, err)
 			require.NotNil(t, removed)
 			require.Equal(t, &msg2, removed, "removed message does not match expected message")
@@ -264,7 +240,7 @@ func TestPendingMessageQueue_RemoveItem(t *testing.T) {
 
 			q.Push(&common.PendingMessage{Msg: msgInQueue})
 
-			got, gotErr := q.RemoveItem(tt.target.MessageID())
+			got, gotErr := q.RemoveItem(tt.target)
 			require.NoError(t, gotErr)
 
 			if tt.want != nil {
