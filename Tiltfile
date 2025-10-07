@@ -155,11 +155,11 @@ docker_build(
 # --- Stellar mock Soroban RPC ---
 docker_build(
     ref='stellar-mock:local',
-    context='soroban/mock',
-    dockerfile='soroban/mock/Dockerfile',
+    context='stellar/mock',
+    dockerfile='stellar/mock/Dockerfile',
 )
 
-k8s_yaml('soroban/mock/stellar-mock.yaml')
+k8s_yaml('stellar/mock/stellar-mock.yaml')
 k8s_resource('stellar-mock', port_forwards=['8000'])
 
 def command_with_dlv(argv):
