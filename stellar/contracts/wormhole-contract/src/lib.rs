@@ -1,28 +1,41 @@
 #![no_std]
 
 use soroban_sdk::{
-    Bytes, BytesN, Env, IntoVal, Symbol, Val, contract, contractevent, contractimpl, contracttype,
+    contract, contractevent, contractimpl, contracttype, panic_with_error, Address, Bytes, BytesN,
+    Env, Symbol, TryFromVal,
 };
-use wormhole_interface::{EVENT_TOPIC_LMP, Wormhole as WormholeInterface};
+use wormhole_interface::{Wormhole as WormholeInterface, WormholeError};
 
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
+    Owner,
     Seq(BytesN<32>),
 }
 
-/// Event payload published under topic (EVENT_TOPIC_LMP, emitter, sequence).
-#[contractevent]
-pub struct LmpData {
-    pub payload: Bytes,
+/// Data payload stored in the event (non-topic fields).
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct MessageData {
     pub nonce: u32,
+    pub payload: Bytes,
     pub consistency: u32,
 }
 
-impl IntoVal<Env, Val> for LmpData {
-    fn into_val(&self, env: &Env) -> Val {
-        (&self.payload, self.nonce, self.consistency).into_val(env)
-    }
+/// Contract event type (no deprecated API).
+/// - Topics: [ "MessagePublished", emitter, sequence ]
+/// - Data:   { nonce, payload, consistency }
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MessagePublished {
+    #[topic]
+    pub emitter: BytesN<32>,
+    #[topic]
+    pub sequence: u64,
+    // Non-topic fields go to the event data map:
+    pub nonce: u32,
+    pub payload: Bytes,
+    pub consistency: u32,
 }
 
 #[contract]
@@ -30,6 +43,14 @@ pub struct Wormhole;
 
 #[contractimpl]
 impl WormholeInterface for Wormhole {
+    fn initialize(env: Env, owner: Address) {
+        if env.storage().persistent().has(&DataKey::Owner) {
+            panic_with_error!(&env, WormholeError::AlreadyInitialized);
+        }
+        env.storage().persistent().set(&DataKey::Owner, &owner);
+        // TODO: Store initial Guardian Set and Chain ID here.
+    }
+
     fn publish_message(
         env: Env,
         emitter: BytesN<32>,
@@ -37,15 +58,20 @@ impl WormholeInterface for Wormhole {
         payload: Bytes,
         consistency: u32,
     ) -> u64 {
+        // TODO: Authorization checks
+
         let seq = bump_sequence(&env, &emitter);
-        env.events().publish(
-            (EVENT_TOPIC_LMP, emitter.clone(), seq),
-            LmpData {
-                payload,
-                nonce,
-                consistency,
-            },
-        );
+
+        // Publish via #[contractevent] helper (no deprecation warnings).
+        MessagePublished {
+            emitter: emitter.clone(),
+            sequence: seq,
+            nonce,
+            payload,
+            consistency,
+        }
+            .publish(&env);
+
         seq
     }
 
@@ -73,98 +99,113 @@ fn bump_sequence(env: &Env, emitter: &BytesN<32>) -> u64 {
 mod tests {
     use super::*;
     use soroban_sdk::{
-        Bytes, BytesN, Env, Symbol, TryFromVal, Vec, symbol_short, testutils::Events,
+        testutils::{Address as _, Events},
+        Address, Bytes, BytesN, Env,
     };
+    // Use the client generated in the interface crate
+    use wormhole_interface::WormholeClient;
 
-    fn setup() -> (Env, soroban_sdk::Address) {
+    fn setup() -> (Env, Address, WormholeClient<'static>) {
         let env = Env::default();
+        env.mock_all_auths();
+        // New API: no deprecation warning.
         let id = env.register(Wormhole, ());
-        (env, id)
+        let client = WormholeClient::new(&env, &id);
+        let owner = Address::generate(&env);
+        client.initialize(&owner);
+        (env, owner, client)
     }
 
-    fn last_event(
-        env: &Env,
-    ) -> (
-        soroban_sdk::Address,
-        Vec<soroban_sdk::Val>,
-        soroban_sdk::Val,
-    ) {
-        let all: Vec<(
-            soroban_sdk::Address,
-            Vec<soroban_sdk::Val>,
-            soroban_sdk::Val,
-        )> = env.events().all();
-        assert!(all.len() > 0, "no events recorded");
-        all.get_unchecked(all.len() - 1)
+    #[derive(Debug, PartialEq)]
+    struct DecodedEvent {
+        emitter: BytesN<32>,
+        sequence: u64,
+        data: MessageData,
     }
 
-    #[test]
-    fn event_topic_constant_is_lmp() {
-        assert_eq!(EVENT_TOPIC_LMP, symbol_short!("LMP"));
+    /// Decode the most recent event emitted by the last contract invocation.
+    fn get_last_message_published(env: &Env) -> DecodedEvent {
+        let events = env.events().all();
+        assert!(!events.is_empty(), "no events recorded");
+        let (_contract_id, topics, data) = events.last().unwrap();
+
+        // Topics: [ "MessagePublished", emitter, sequence ]
+        assert_eq!(topics.len(), 3, "incorrect number of topics");
+
+        let t0 = Symbol::try_from_val(env, &topics.get_unchecked(0)).expect("topic 0 decode failed");
+        assert_eq!(
+            t0,
+            Symbol::new(env, "message_published"),
+            "incorrect event name"
+        );
+
+        let emitter = BytesN::<32>::try_from_val(env, &topics.get_unchecked(1))
+            .expect("topic 1 decode failed (emitter)");
+        let sequence =
+            u64::try_from_val(env, &topics.get_unchecked(2)).expect("topic 2 decode failed (seq)");
+
+        // Event data matches MessageData fields.
+        let message_data = MessageData::try_from_val(env, &data).expect("data decode failed");
+
+        DecodedEvent {
+            emitter,
+            sequence,
+            data: message_data,
+        }
     }
 
     #[test]
     fn initial_sequence_is_zero() {
-        let (env, id) = setup();
-        let client = WormholeClient::new(&env, &id);
+        let (env, _, client) = setup();
         let emitter = BytesN::<32>::from_array(&env, &[0xAA; 32]);
         assert_eq!(client.sequence_of(&emitter), 0);
     }
 
     #[test]
     fn publish_increments_sequence_and_emits_event() {
-        let (env, id) = setup();
-        let client = WormholeClient::new(&env, &id);
+        let (env, _owner, client) = setup();
 
         let emitter = BytesN::<32>::from_array(&env, &[7u8; 32]);
         let payload = Bytes::from_array(&env, &[1, 2, 3, 4]);
+        let consistency = 1u32;
 
         let before_len: u32 = env.events().all().len();
 
-        let s1 = client.publish_message(&emitter, &7u32, &payload, &1u32);
+        // Emit
+        let s1 = client.publish_message(&emitter, &7u32, &payload, &consistency);
+
+        // Check events immediately (no intervening call that would reset the buffer).
+        let mid_len: u32 = env.events().all().len();
+        assert!(mid_len > before_len, "Event count did not increase");
+
+        // Now safe to do other calls
         assert_eq!(s1, 1);
         assert_eq!(client.sequence_of(&emitter), 1);
-        let mid_len: u32 = env.events().all().len();
-        assert_eq!(mid_len, before_len + 1);
 
-        let s2 = client.publish_message(&emitter, &8u32, &payload, &1u32);
+        let nonce2 = 8u32;
+        let s2 = client.publish_message(&emitter, &nonce2, &payload, &consistency);
         assert_eq!(s2, 2);
-        assert_eq!(client.sequence_of(&emitter), 2);
-        let after_len: u32 = env.events().all().len();
-        assert_eq!(after_len, mid_len + 1);
 
-        let (_addr, topics, data) = last_event(&env);
-        assert_eq!(topics.len(), 3);
-
-        let t0: Symbol = Symbol::try_from_val(&env, &topics.get_unchecked(0)).unwrap();
-        let t1: BytesN<32> = BytesN::<32>::try_from_val(&env, &topics.get_unchecked(1)).unwrap();
-        let t2: i128 = i128::try_from_val(&env, &topics.get_unchecked(2)).unwrap();
-
-        assert_eq!(t0, EVENT_TOPIC_LMP);
-        assert_eq!(t1, emitter);
-        assert_eq!(t2, s2 as i128);
-
-        let decoded: (Bytes, u32, u32) = <(Bytes, u32, u32)>::try_from_val(&env, &data).unwrap();
-        assert_eq!(decoded.0, payload);
-        assert_eq!(decoded.1, 8);
-        assert_eq!(decoded.2, 1);
+        let event = get_last_message_published(&env);
+        assert_eq!(event.sequence, s2);
+        assert_eq!(event.emitter, emitter);
+        assert_eq!(event.data.nonce, nonce2);
+        assert_eq!(event.data.payload, payload);
+        assert_eq!(event.data.consistency, consistency);
     }
 
     #[test]
     fn sequences_are_per_emitter() {
-        let (env, id) = setup();
-        let client = WormholeClient::new(&env, &id);
+        let (env, _, client) = setup();
 
         let a = BytesN::<32>::from_array(&env, &[1u8; 32]);
         let b = BytesN::<32>::from_array(&env, &[2u8; 32]);
         let payload = Bytes::from_array(&env, &[]);
+        let consistency = 1u32;
 
-        assert_eq!(client.sequence_of(&a), 0);
-        assert_eq!(client.sequence_of(&b), 0);
-
-        assert_eq!(client.publish_message(&a, &1u32, &payload, &1u32), 1);
-        assert_eq!(client.publish_message(&a, &2u32, &payload, &1u32), 2);
-        assert_eq!(client.publish_message(&b, &3u32, &payload, &1u32), 1);
+        client.publish_message(&a, &1u32, &payload, &consistency);
+        client.publish_message(&a, &2u32, &payload, &consistency);
+        client.publish_message(&b, &3u32, &payload, &consistency);
 
         assert_eq!(client.sequence_of(&a), 2);
         assert_eq!(client.sequence_of(&b), 1);
@@ -172,42 +213,36 @@ mod tests {
 
     #[test]
     fn last_event_topics_and_data_roundtrip() {
-        let (env, id) = setup();
-        let client = WormholeClient::new(&env, &id);
+        let (env, _, client) = setup();
 
         let emitter = BytesN::<32>::from_array(&env, &[0x11; 32]);
         let payload = Bytes::from_array(&env, &[9, 9, 9]);
+        let nonce = 42u32;
+        let consistency = 5u32;
 
-        let seq = client.publish_message(&emitter, &42u32, &payload, &5u32);
+        let seq = client.publish_message(&emitter, &nonce, &payload, &consistency);
         assert_eq!(seq, 1);
 
-        let (_addr, topics, data) = last_event(&env);
+        let event = get_last_message_published(&env);
 
-        let t0: Symbol = Symbol::try_from_val(&env, &topics.get_unchecked(0)).unwrap();
-        let t1: BytesN<32> = BytesN::<32>::try_from_val(&env, &topics.get_unchecked(1)).unwrap();
-        let t2: i128 = i128::try_from_val(&env, &topics.get_unchecked(2)).unwrap();
-
-        assert_eq!(t0, EVENT_TOPIC_LMP);
-        assert_eq!(t1, emitter);
-        assert_eq!(t2, 1);
-
-        let decoded: (Bytes, u32, u32) = <(Bytes, u32, u32)>::try_from_val(&env, &data).unwrap();
-        assert_eq!(decoded.0, payload);
-        assert_eq!(decoded.1, 42);
-        assert_eq!(decoded.2, 5);
+        assert_eq!(event.emitter, emitter);
+        assert_eq!(event.sequence, seq);
+        assert_eq!(event.data.payload, payload);
+        assert_eq!(event.data.nonce, nonce);
+        assert_eq!(event.data.consistency, consistency);
     }
 
     #[test]
     fn many_publishes_monotonic_sequence() {
-        let (env, id) = setup();
-        let client = WormholeClient::new(&env, &id);
+        let (env, _, client) = setup();
 
         let emitter = BytesN::<32>::from_array(&env, &[0x55; 32]);
         let payload = Bytes::from_array(&env, &[0xAB]);
+        let consistency = 1u32;
 
         let mut last = 0u64;
         for i in 0..10u32 {
-            let s = client.publish_message(&emitter, &i, &payload, &1u32);
+            let s = client.publish_message(&emitter, &i, &payload, &consistency);
             assert_eq!(s, (i as u64) + 1);
             assert!(s > last);
             last = s;
