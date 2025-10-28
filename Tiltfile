@@ -8,6 +8,7 @@
 load("ext://namespace", "namespace_create", "namespace_inject")
 load("ext://secret", "secret_yaml_generic")
 
+
 # set the replica value of a StatefulSet
 def set_replicas_in_statefulset(config_yaml, statefulset_name,  num_replicas):
     for obj in config_yaml:
@@ -123,9 +124,11 @@ def k8s_yaml_with_ns(objects):
     return k8s_yaml(namespace_inject(objects, namespace))
 
 docker_build(
-    ref = "cli-gen",
-    context = ".",
-    dockerfile = "Dockerfile.cli",
+    'cli-gen',
+    context='.',
+    dockerfile='cli-gen.Dockerfile',
+    live_update=[],
+    platform='linux/amd64',
 )
 
 docker_build(
@@ -133,6 +136,8 @@ docker_build(
     context = ".",
     dockerfile = "Dockerfile.const",
     build_args={"num_guardians": '%s' % (num_guardians)},
+
+    platform='linux/amd64',
 )
 
 # node
@@ -142,8 +147,20 @@ docker_build(
     context = ".",
     dockerfile = "node/Dockerfile",
     target = "build",
-    ignore=["./sdk/js", "./relayer"]
+    ignore=["./sdk/js", "./relayer"],
+
+    platform='linux/amd64',
 )
+
+# --- Stellar mock Soroban RPC ---
+docker_build(
+    ref='stellar-mock:local',
+    context='stellar/soroban/mock',
+    dockerfile='stellar/soroban/mock/Dockerfile',
+)
+
+k8s_yaml('stellar/soroban/mock/stellar-mock.yaml')
+k8s_resource('stellar-mock', port_forwards=['8000'])
 
 def command_with_dlv(argv):
     return [
@@ -511,23 +528,12 @@ if solana or pythnet:
 # eth devnet
 
 docker_build(
-    ref = "eth-node",
-    context = ".",
-    only = ["./ethereum", "./relayer/ethereum"],
-    dockerfile = "./ethereum/Dockerfile",
-
-    # ignore local node_modules (in case they're present)
-    ignore = ["./ethereum/node_modules","./relayer/ethereum/node_modules"],
-    build_args = {"num_guardians": str(num_guardians), "dev": str(not ci)},
-
-    # sync external scripts for incremental development
-    # (everything else needs to be restarted from scratch for determinism)
-    #
-    # This relies on --update-mode=exec to work properly with a non-root user.
-    # https://github.com/tilt-dev/tilt/issues/3708
-    live_update = [
-        sync("./ethereum/src", "/home/node/app/src"),
-    ],
+    ref='eth-node',
+    context='.',
+    only=['./ethereum', './relayer/ethereum'],
+    dockerfile='./ethereum/Dockerfile',
+    platform='linux/amd64',
+    build_args={'CONST_IMAGE': 'localhost:5001/const-gen:latest'},
 )
 
 if redis or generic_relayer:
