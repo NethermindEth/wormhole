@@ -13,7 +13,6 @@ enum DataKey {
     Seq(BytesN<32>),
 }
 
-/// Data payload stored in the event (non-topic fields).
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct MessageData {
@@ -22,9 +21,6 @@ pub struct MessageData {
     pub consistency: u32,
 }
 
-/// Contract event type (no deprecated API).
-/// - Topics: [ "MessagePublished", emitter, sequence ]
-/// - Data:   { nonce, payload, consistency }
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessagePublished {
@@ -32,7 +28,6 @@ pub struct MessagePublished {
     pub emitter: BytesN<32>,
     #[topic]
     pub sequence: u64,
-    // Non-topic fields go to the event data map:
     pub nonce: u32,
     pub payload: Bytes,
     pub consistency: u32,
@@ -48,7 +43,7 @@ impl WormholeInterface for Wormhole {
             panic_with_error!(&env, WormholeError::AlreadyInitialized);
         }
         env.storage().persistent().set(&DataKey::Owner, &owner);
-        // TODO: Store initial Guardian Set and Chain ID here.
+        // TODO Store guardians here
     }
 
     fn publish_message(
@@ -62,7 +57,6 @@ impl WormholeInterface for Wormhole {
 
         let seq = bump_sequence(&env, &emitter);
 
-        // Publish via #[contractevent] helper (no deprecation warnings).
         MessagePublished {
             emitter: emitter.clone(),
             sequence: seq,
@@ -102,13 +96,11 @@ mod tests {
         testutils::{Address as _, Events},
         Address, Bytes, BytesN, Env,
     };
-    // Use the client generated in the interface crate
     use wormhole_interface::WormholeClient;
 
     fn setup() -> (Env, Address, WormholeClient<'static>) {
         let env = Env::default();
         env.mock_all_auths();
-        // New API: no deprecation warning.
         let id = env.register(Wormhole, ());
         let client = WormholeClient::new(&env, &id);
         let owner = Address::generate(&env);
@@ -123,13 +115,12 @@ mod tests {
         data: MessageData,
     }
 
-    /// Decode the most recent event emitted by the last contract invocation.
     fn get_last_message_published(env: &Env) -> DecodedEvent {
         let events = env.events().all();
         assert!(!events.is_empty(), "no events recorded");
         let (_contract_id, topics, data) = events.last().unwrap();
 
-        // Topics: [ "MessagePublished", emitter, sequence ]
+        // topics: [ MessagePublished, emitter, sequence ]
         assert_eq!(topics.len(), 3, "incorrect number of topics");
 
         let t0 = Symbol::try_from_val(env, &topics.get_unchecked(0)).expect("topic 0 decode failed");
@@ -144,7 +135,6 @@ mod tests {
         let sequence =
             u64::try_from_val(env, &topics.get_unchecked(2)).expect("topic 2 decode failed (seq)");
 
-        // Event data matches MessageData fields.
         let message_data = MessageData::try_from_val(env, &data).expect("data decode failed");
 
         DecodedEvent {
@@ -171,14 +161,12 @@ mod tests {
 
         let before_len: u32 = env.events().all().len();
 
-        // Emit
         let s1 = client.publish_message(&emitter, &7u32, &payload, &consistency);
 
         // Check events immediately (no intervening call that would reset the buffer).
         let mid_len: u32 = env.events().all().len();
         assert!(mid_len > before_len, "Event count did not increase");
-
-        // Now safe to do other calls
+        
         assert_eq!(s1, 1);
         assert_eq!(client.sequence_of(&emitter), 1);
 
