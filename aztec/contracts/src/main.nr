@@ -21,7 +21,7 @@ pub contract Wormhole {
     use dep::keccak256::keccak256;
 
     use dep::aztec::{
-        macros::{functions::{initializer, internal, private, public, utility}, storage::storage},
+        macros::{functions::{initializer, internal, external}, storage::storage},
         state_vars::{map::Map, public_mutable::PublicMutable, delayed_public_mutable::DelayedPublicMutable},
         protocol_types::{
             address::AztecAddress,
@@ -68,7 +68,7 @@ pub contract Wormhole {
     // CONTRACT INITIALIZATION
     // ============================================================================
 
-    #[public]
+    #[external("public")]
     #[initializer]
     fn init(
         chain_id: u16,
@@ -89,7 +89,7 @@ pub contract Wormhole {
     // CORE FUNCTIONALITY - MESSAGE PUBLISHING
     // ============================================================================
 
-    #[public]
+    #[external("public")]
     fn publish_message_in_public(
         nonce: u64,
         payloads: [[u8; 31]; 8],
@@ -110,11 +110,12 @@ pub contract Wormhole {
                 .call(&mut context);
         }
 
-        let sequence = storage.sequences.at(context.msg_sender()).read();
-        storage.sequences.at(context.msg_sender()).write(sequence + 1);
+        let sender = context.msg_sender().unwrap();
+        let sequence = storage.sequences.at(sender).read();
+        storage.sequences.at(sender).write(sequence + 1);
 
         let msg: [Field; 13] = [
-            context.msg_sender().to_field(),
+            sender.to_field(),
             sequence as Field,
             nonce as Field,
             consistency as Field,
@@ -133,7 +134,7 @@ pub contract Wormhole {
         sequence
     }
 
-    #[private]
+    #[external("private")]
     fn publish_message_in_private(
         nonce: u64,
         payloads: [[u8; 31]; 8],
@@ -159,14 +160,15 @@ pub contract Wormhole {
         );
     }
 
-    #[public]
+    #[external("public")]
     #[internal]
     fn _publish_message(nonce: u64, payloads: [[u8; 31]; 8], consistency: u8) -> u64 {
-        let sequence = storage.sequences.at(context.msg_sender()).read();
-        storage.sequences.at(context.msg_sender()).write(sequence + 1);
+        let sender = context.msg_sender().unwrap();
+        let sequence = storage.sequences.at(sender).read();
+        storage.sequences.at(sender).write(sequence + 1);
 
         let msg: [Field; 13] = [
-            context.msg_sender().to_field(),
+            sender.to_field(),
             sequence as Field,
             nonce as Field,
             consistency as Field,
@@ -189,7 +191,7 @@ pub contract Wormhole {
     // CORE FUNCTIONALITY - VAA VERIFICATION
     // ============================================================================
     
-    #[utility]
+    #[external("utility")]
     unconstrained fn parse_vaa_unconstrained(
         bytes: [u8; 2000],
         actual_length: u32,
@@ -231,7 +233,7 @@ pub contract Wormhole {
         (guardian_set_index, signatures_len, signatures, body_bytes, body_length)
     }
 
-    #[utility]
+    #[external("utility")]
     unconstrained fn compute_vaa_hash_unconstrained(
         body_bytes: [u8; 1860],
         body_length: u32,
@@ -315,7 +317,7 @@ pub contract Wormhole {
         (pub_keys_x, pub_keys_y, signature_bytes_array, hash, signatures_len)
     }
 
-    #[private]
+    #[external("private")]
     fn verify_vaa(bytes: [u8; 2000], actual_length: u32) {
         // Safety: verify_vaa_unconstrained performs parsing and validation that doesn't need constraints
         let (pub_keys_x, pub_keys_y, signature_bytes_array, hash, _signatures_len) =
@@ -363,97 +365,97 @@ pub contract Wormhole {
     // ============================================================================
     
     // Individual guardian setters
-    #[public]
+    #[external("public")]
     fn set_guardian1(guardian: Guardian, index: u32) {
         storage.guardian_1.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian2(guardian: Guardian, index: u32) {
         storage.guardian_2.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian3(guardian: Guardian, index: u32) {
         storage.guardian_3.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian4(guardian: Guardian, index: u32) {
         storage.guardian_4.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian5(guardian: Guardian, index: u32) {
         storage.guardian_5.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian6(guardian: Guardian, index: u32) {
         storage.guardian_6.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian7(guardian: Guardian, index: u32) {
         storage.guardian_7.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian8(guardian: Guardian, index: u32) {
         storage.guardian_8.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian9(guardian: Guardian, index: u32) {
         storage.guardian_9.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian10(guardian: Guardian, index: u32) {
         storage.guardian_10.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian11(guardian: Guardian, index: u32) {
         storage.guardian_11.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian12(guardian: Guardian, index: u32) {
         storage.guardian_12.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian13(guardian: Guardian, index: u32) {
         storage.guardian_13.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian14(guardian: Guardian, index: u32) {
         storage.guardian_14.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian15(guardian: Guardian, index: u32) {
         storage.guardian_15.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian16(guardian: Guardian, index: u32) {
         storage.guardian_16.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian17(guardian: Guardian, index: u32) {
         storage.guardian_17.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian18(guardian: Guardian, index: u32) {
         storage.guardian_18.at(index).write(guardian);
     }
 
-    #[public]
+    #[external("public")]
     fn set_guardian19(guardian: Guardian, index: u32) {
         storage.guardian_19.at(index).write(guardian);
     }
@@ -462,24 +464,24 @@ pub contract Wormhole {
     // GOVERNANCE FUNCTIONS
     // ============================================================================
 
-    #[public]
+    #[external("public")]
     fn expire_guardian_set(index: u32) {
         storage.current_guardian_set_index.at(index).write(context.timestamp() + 86400);
     }
 
-    #[public]
+    #[external("public")]
     fn guardian_set_expired(index: u32) -> bool {
         let timestamp = storage.current_guardian_set_index.at(index).read();
         context.timestamp() > timestamp
     }
 
-    #[public]
+    #[external("public")]
     fn set_provider(provider: Provider) {
         let updated_storage = WormholeStorage::set_provider(storage.state.read(), provider);
         storage.state.write(updated_storage);
     }
 
-    #[public]
+    #[external("public")]
     fn get_provider() -> Provider {
         WormholeStorage::get_provider(storage.state.read())
     }
@@ -488,54 +490,54 @@ pub contract Wormhole {
     // ACCESS CONTROL
     // ============================================================================
     
-    #[public]
+    #[external("public")]
     #[internal]
     fn _assert_is_owner() {
-        assert(storage.owner.read().eq(context.msg_sender()), "caller is not owner");
+        assert(storage.owner.read().eq(context.msg_sender().unwrap()), "caller is not owner");
     }
 
     // ============================================================================
     // ADDRESS MANAGEMENT FUNCTIONS
     // ============================================================================
     
-    #[public]
+    #[external("public")]
     fn set_receiver_address(new_receiver_address: AztecAddress) {
         _assert_is_owner();
         storage.receiver_address.schedule_value_change(new_receiver_address);
     }
 
-    #[public]
+    #[external("public")]
     fn set_token_address(new_token_address: AztecAddress) {
         _assert_is_owner();
         storage.token_address.schedule_value_change(new_token_address);
     }
 
-    #[public]
+    #[external("public")]
     fn get_receiver_address() -> AztecAddress {
         storage.receiver_address.get_current_value()
     }
 
-    #[public]
+    #[external("public")]
     fn get_token_address() -> AztecAddress {
         storage.token_address.get_current_value()
     }
 
-    #[public]
+    #[external("public")]
     fn get_scheduled_receiver_address() -> (AztecAddress, u64) {
         storage.receiver_address.get_scheduled_value()
     }
 
-    #[public]
+    #[external("public")]
     fn get_scheduled_token_address() -> (AztecAddress, u64) {
         storage.token_address.get_scheduled_value()
     }
 
-    #[public]
+    #[external("public")]
     fn get_owner() -> AztecAddress {
         storage.owner.read()
     }
 
-    #[public]
+    #[external("public")]
     fn transfer_ownership(new_owner: AztecAddress) {
         _assert_is_owner();
         storage.owner.write(new_owner);
