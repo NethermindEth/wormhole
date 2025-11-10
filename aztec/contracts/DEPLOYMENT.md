@@ -37,7 +37,7 @@ If you prefer to deploy manually or need more control over the process, follow t
 
 ```bash
 # Devnet configuration
-export VERSION=3.0.0-devnet.2
+export VERSION=3.0.0-devnet.4
 export NODE_URL=https://devnet.aztec-labs.com/
 aztec-up # pull the devnet image
 export SPONSORED_FPC_ADDRESS=$(aztec get-canonical-sponsored-fpc-address | awk '{print $NF}')
