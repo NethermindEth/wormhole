@@ -160,6 +160,89 @@ pub contract Wormhole {
         );
     }
 
+    #[external("private")]
+    fn publish_message_in_private_flat(
+        nonce: u64,
+        // payloads: [[u8; 31]; 8],
+        payload_1: [u8; 31],
+        payload_2: [u8; 31],
+        payload_3: [u8; 31],
+        payload_4: [u8; 31],
+        payload_5: [u8; 31],
+        payload_6: [u8; 31],
+        payload_7: [u8; 31],
+        payload_8: [u8; 31],
+        message_fee: u128,
+        consistency: u8,
+        from: AztecAddress,
+        token_nonce: Field,
+    ) {
+        assert(0 <= message_fee, "insufficient fee");
+
+        let receiver_address = storage.receiver_address.get_current_value();
+        let token_address = storage.token_address.get_current_value();
+
+        // Only transfer tokens if fee is greater than 0
+        if message_fee > 0 {
+            let _ = Token::at(token_address)
+                .transfer_in_private(from, receiver_address, message_fee, token_nonce)
+                .call(&mut context);
+        }
+
+        Wormhole::at(context.this_address())._publish_message_flat(
+            nonce,
+            payload_1,
+            payload_2,
+            payload_3,
+            payload_4,
+            payload_5,
+            payload_6,
+            payload_7,
+            payload_8,
+            consistency
+        ).enqueue(
+            &mut context,
+        );
+    }
+
+    #[external("public")]
+    #[internal]
+    fn _publish_message_flat(
+        nonce: u64,
+        payload_1: [u8; 31],
+        payload_2: [u8; 31],
+        payload_3: [u8; 31],
+        payload_4: [u8; 31],
+        payload_5: [u8; 31],
+        payload_6: [u8; 31],
+        payload_7: [u8; 31],
+        payload_8: [u8; 31],
+        consistency: u8
+    ) -> u64 {
+        let sender = context.msg_sender().unwrap();
+        let sequence = storage.sequences.at(sender).read();
+        storage.sequences.at(sender).write(sequence + 1);
+
+        let msg: [Field; 13] = [
+            sender.to_field(),
+            sequence as Field,
+            nonce as Field,
+            consistency as Field,
+            context.timestamp() as Field,
+            Field::from_le_bytes(payload_1),
+            Field::from_le_bytes(payload_2),
+            Field::from_le_bytes(payload_3),
+            Field::from_le_bytes(payload_4),
+            Field::from_le_bytes(payload_5),
+            Field::from_le_bytes(payload_6),
+            Field::from_le_bytes(payload_7),
+            Field::from_le_bytes(payload_8),
+        ];
+
+        context.emit_public_log(msg);
+        sequence
+    }
+
     #[external("public")]
     #[internal]
     fn _publish_message(nonce: u64, payloads: [[u8; 31]; 8], consistency: u8) -> u64 {
