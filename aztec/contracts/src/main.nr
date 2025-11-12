@@ -179,11 +179,11 @@ pub contract Wormhole {
     ) {
         assert(0 <= message_fee, "insufficient fee");
 
-        let receiver_address = storage.receiver_address.get_current_value();
-        let token_address = storage.token_address.get_current_value();
 
         // Only transfer tokens if fee is greater than 0
         if message_fee > 0 {
+            let receiver_address = storage.receiver_address.get_current_value();
+            let token_address = storage.token_address.get_current_value();
             let _ = Token::at(token_address)
                 .transfer_in_private(from, receiver_address, message_fee, token_nonce)
                 .call(&mut context);
