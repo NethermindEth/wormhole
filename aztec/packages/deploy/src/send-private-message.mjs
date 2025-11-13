@@ -1,131 +1,193 @@
-// src/send-message.mjs
-import { getInitialTestAccountsWallets } from '@aztec/accounts/testing';
-import { Contract, createPXEClient, loadContractArtifact, waitForPXE } from '@aztec/aztec.js';
-import { readFileSync, writeFileSync } from 'fs';
-import WormholeJson from "../../../contracts/target/wormhole_contracts-Wormhole.json" assert { type: "json" };
-import { TokenContract } from '@aztec/noir-contracts.js/Token'; 
+// Minimal private Wormhole message sender for Aztec devnet 3.0.0
+import dotenv from 'dotenv';
+import { readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 
-const WormholeJsonContractArtifact = loadContractArtifact(WormholeJson);
+import { Contract } from '@aztec/aztec.js/contracts';
+import { loadContractArtifact } from '@aztec/aztec.js/abi';
+import { createAztecNodeClient } from '@aztec/aztec.js/node';
+import { createPXE, getPXEConfig } from '@aztec/pxe/server';
+import { createStore } from '@aztec/kv-store/lmdb';
+import { AccountManager, BaseWallet } from '@aztec/aztec.js/wallet';
+import { SchnorrAccountContract, getSchnorrAccountContractAddress } from '@aztec/accounts/schnorr';
+import { deriveSigningKey } from '@aztec/stdlib/keys';
+import { Fr } from '@aztec/aztec.js/fields';
+import { AztecAddress } from '@aztec/aztec.js/addresses';
 
-const { PXE_URL = 'http://localhost:8090' } = process.env;
+import WormholeJson from '../../../contracts/target/wormhole_contracts-Wormhole.json' with { type: 'json' };
+
+dotenv.config();
+
+const {
+  PXE_URL = 'https://devnet.aztec-labs.com',
+  NODE_URL = PXE_URL,
+  PRIVATE_KEY,
+  SALT = '0x0000000000000000000000000000000000000000000000000000000000000000',
+} = process.env;
+
+const WormholeContractArtifact = loadContractArtifact(WormholeJson);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+class PXEWallet extends BaseWallet {
+  constructor(account, pxeInstance, aztecNode) {
+    super(pxeInstance, aztecNode);
+    this.account = account;
+  }
+
+  getAddress() {
+    return this.account.getAddress();
+  }
+
+  get address() {
+    return this.account.getAddress();
+  }
+
+  async getAccounts() {
+    const registered = await this.pxe.getRegisteredAccounts();
+    return registered.map(({ address }) => ({ item: address, alias: '' }));
+  }
+
+  async getAccountFromAddress(address) {
+    if (address.equals(this.account.getAddress())) {
+      return this.account;
+    }
+    throw new Error(`Account ${address.toString()} not loaded in wallet`);
+  }
+
+  async createAuthWit(intent, isPrivate) {
+    return this.account.createAuthWit(intent, isPrivate);
+  }
+}
+
+function loadAddresses() {
+  const addressesPath = join(__dirname, 'addresses.json');
+  try {
+    const raw = readFileSync(addressesPath, 'utf8');
+    const parsed = JSON.parse(raw);
+
+    if (!parsed?.wormhole) {
+      throw new Error('Missing wormhole address in addresses.json');
+    }
+
+    return parsed;
+  } catch (error) {
+    throw new Error(`Failed to read addresses.json: ${error.message}`);
+  }
+}
+
+function buildPayloads(message) {
+  const encoder = new TextEncoder();
+  const messageBytes = encoder.encode(message);
+  const maxLength = 31;
+
+  const firstChunk = new Array(maxLength).fill(0);
+  for (let i = 0; i < Math.min(messageBytes.length, maxLength); i += 1) {
+    firstChunk[i] = messageBytes[i];
+  }
+
+  const payloads = Array.from({ length: 8 }, () => new Array(maxLength).fill(0));
+  payloads[0] = firstChunk;
+
+  return payloads;
+}
+
+async function setupWallet(pxe, nodeClient) {
+  if (!PRIVATE_KEY) {
+    throw new Error('PRIVATE_KEY environment variable is required');
+  }
+
+  const secretKey = Fr.fromString(PRIVATE_KEY);
+  const salt = Fr.fromString(SALT);
+  const signingKey = deriveSigningKey(secretKey);
+
+  const accountContract = new SchnorrAccountContract(signingKey);
+
+  const accountManager = await AccountManager.create(
+    {
+      getChainInfo: async () => {
+        const { l1ChainId, rollupVersion } = await nodeClient.getNodeInfo();
+        return {
+          chainId: new Fr(l1ChainId),
+          version: new Fr(rollupVersion),
+        };
+      },
+      registerContract: async (instanceData, artifact) =>
+        pxe.registerContract({ instance: instanceData, artifact }),
+    },
+    secretKey,
+    accountContract,
+    salt,
+  );
+
+  const completeAddress = await accountManager.getCompleteAddress();
+  const expectedAddress = await getSchnorrAccountContractAddress(secretKey, salt, signingKey);
+
+  if (!completeAddress.address.equals(expectedAddress)) {
+    console.warn(
+      `⚠️  Derived account address ${completeAddress.address.toString()} differs from expectation ${expectedAddress.toString()}`,
+    );
+  }
+
+  const accountInstance = accountManager.getInstance();
+  const accountArtifact = await accountContract.getContractArtifact();
+
+  await pxe.registerContract({ instance: accountInstance, artifact: accountArtifact });
+  await pxe.registerAccount(secretKey, completeAddress.partialAddress);
+
+  const account = await accountManager.getAccount();
+  return new PXEWallet(account, pxe, nodeClient);
+}
 
 async function main() {
-    const pxe = createPXEClient(PXE_URL);
-    await waitForPXE(pxe);
+  console.log('🔄 Connecting to Aztec PXE...');
+  const nodeClient = createAztecNodeClient(NODE_URL);
+  const store = await createStore('pxe', {
+    dataDirectory: join(__dirname, '..', 'store'),
+    dataStoreMapSizeKB: 1e6,
+  });
+  const config = getPXEConfig();
+  const pxe = await createPXE(nodeClient, config, { store });
+  console.log(`✅ Connected to PXE at ${PXE_URL}`);
 
-    console.log(`Connected to PXE at ${PXE_URL}`);
+  const wallet = await setupWallet(pxe, nodeClient);
+  const senderAddress = wallet.address;
+  console.log(`👛 Using account ${senderAddress.toString()}`);
 
-    // Read the deployed contract address from addresses.json
-    let addresses;
-    try {
-        addresses = JSON.parse(readFileSync('addresses.json', 'utf8'));
-    } catch (error) {
-        console.error("Error reading addresses.json file:", error);
-        process.exit(1);
-    }
-    
-    if (!addresses.wormhole ||  !addresses.token) {
-        console.error("Wormhole or token contract address not found in addresses.json");
-        process.exit(1);
-    }
+  const addresses = loadAddresses();
+  const wormholeAddress = AztecAddress.fromString(addresses.wormhole);
+  console.log(`🔗 Target Wormhole core contract: ${wormholeAddress.toString()}`);
 
-    console.log("Addresses from addresses.json:", addresses);
+  const wormholeInstance = await nodeClient.getContract(wormholeAddress);
+  if (!wormholeInstance) {
+    throw new Error(`No contract instance found at ${wormholeAddress.toString()}`);
+  }
 
-    const [ownerWallet, receiverWallet] = await getInitialTestAccountsWallets(pxe);
-    const ownerAddress = ownerWallet.getAddress();
+  await pxe.registerContract({ instance: wormholeInstance, artifact: WormholeContractArtifact });
+  const wormholeContract = new Contract(wormholeInstance, WormholeContractArtifact, wallet);
 
-    // Connect to the already deployed contract
-    const contract = await Contract.at(addresses.wormhole, WormholeJsonContractArtifact, ownerWallet);
-    console.log(`Connected to Wormhole contract at ${addresses.wormhole}`);
-    
-    const token = await TokenContract.at(addresses.token, ownerWallet);
-    console.log(`Connected to Token contract at ${addresses.token}`);
-    
-    // The message to send
-    let message = "Hello World";
+  const message = 'Hello Wormhole from Aztec devnet!';
+  const payloads = buildPayloads(message);
 
-    // Convert message to bytes
-    let encoder = new TextEncoder();
-    let messageBytes = encoder.encode(message);
-    
-    // Create a padded array (try different sizes - this one is 31 bytes)
-    const PAYLOAD_SIZE = 31;
-    let paddedBytes = new Array(PAYLOAD_SIZE).fill(0);
-    
-    // Copy the message bytes into the padded array
-    for (let i = 0; i < messageBytes.length && i < PAYLOAD_SIZE; i++) {
-        paddedBytes[i] = messageBytes[i];
-    }
+  console.log('🛠️  Prepared payloads, publishing private message with zero fee...');
 
-    let payloads = [];
-    for (let i = 0; i < 8; i++) {
-        payloads.push(paddedBytes);
-    }
-    
-    console.log(`Sending message: "${messageBytes} 8 times"`);
-    console.log(`Padded payload (${paddedBytes.length} bytes):`, payloads);
-    
-    console.log("Sending transaction...");
+  const tx = await wormholeContract.methods
+    .publish_message_in_private(
+      1,
+      payloads,
+      0n,
+      1,
+      senderAddress,
+      new Fr(0n),
+    )
+    .send()
+    .wait();
 
-    const msg_fee = 3n;
-    // get nonce and increment it
-    const nonce_file_data = JSON.parse(readFileSync('nonce.json', 'utf8'));
-
-    // Safe BigInt handling
-    const current_nonce = nonce_file_data.token_nonce
-        ? BigInt(nonce_file_data.token_nonce)
-        : 0n;
-
-    const token_nonce = current_nonce + 1n;
-
-    const new_nonce_data = { token_nonce: token_nonce.toString() };
-    
-    writeFileSync('nonce.json', JSON.stringify(new_nonce_data, null, 2));  
-    console.log(`Using token nonce: ${token_nonce}`);
-
-    console.log(`Taking payment in private...`);
-    const privateAction = token.methods.transfer_in_private(
-        ownerAddress,
-        receiverWallet.getAddress(),
-        msg_fee,
-        token_nonce
-    );
-    console.log(`${ownerAddress} is transferring ${msg_fee} tokens to ${receiverWallet.getAddress()} in private`);
-
-    const initWitness = await ownerWallet.createAuthWit({ 
-        caller: contract.address, 
-        action: privateAction 
-    });
-
-    console.log(`Generated private authwit`);
-
-    const tx = contract.methods.publish_message_in_private(100, payloads, msg_fee, 2, ownerAddress, token_nonce).send({ authWitnesses: [initWitness] });
-    
-    // Wait for the transaction to be mined
-    const receipt = await tx.wait();
-    console.log(`Transaction sent! Hash: ${receipt.txHash}`);
-    
-    const sampleLogFilter = {
-        fromBlock: 0,
-        toBlock: 190,
-        contractAddress: '0x081a143b80470311c64f8fd1b67a074e2aa312bf5e22e6ebe0b17c5b3b44470b'
-    };
-
-    const logs = await pxe.getPublicLogs(sampleLogFilter);
-
-    console.log(logs.logs[0]);
-
-    const fromBlock = await pxe.getBlockNumber();
-    const logFilter = {
-        fromBlock,
-        toBlock: fromBlock + 1,
-    };
-    const publicLogs = (await pxe.getPublicLogs(logFilter)).logs;
-
-    console.log(publicLogs);
+  console.log(`✅ Private message published! Tx hash: ${tx.txHash}`);
 }
 
 main().catch((err) => {
-  console.error(`Error in message sending script: ${err}`);
+  console.error('❌ Error while sending private message:', err);
   process.exit(1);
 });
