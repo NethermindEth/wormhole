@@ -1,7 +1,7 @@
 // src/deploy.mjs
 import { getInitialTestAccountsWallets } from '@aztec/accounts/testing';
 import { Contract, createPXEClient, loadContractArtifact, waitForPXE } from '@aztec/aztec.js';
-import WormholeJson from "../../../contracts/target/wormhole_contracts-Wormhole.json" assert { type: "json" };
+import WormholeJson from "../contracts/target/wormhole_contracts-Wormhole.json" assert { type: "json" };
 import { TokenContract } from '@aztec/noir-contracts.js/Token'; 
 import { writeFileSync, readFileSync } from 'fs';
 
