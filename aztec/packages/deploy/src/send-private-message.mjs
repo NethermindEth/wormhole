@@ -4,24 +4,26 @@ import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
-import { Contract } from '@aztec/aztec.js/contracts';
+import { AztecAddress } from '@aztec/aztec.js/addresses';
+import { Fr } from '@aztec/aztec.js/fields';
+import { Contract, getContractInstanceFromInstantiationParams } from '@aztec/aztec.js/contracts';
 import { loadContractArtifact } from '@aztec/aztec.js/abi';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
-import { createPXE, getPXEConfig } from '@aztec/pxe/server';
-import { createStore } from '@aztec/kv-store/lmdb';
+import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import { AccountManager, BaseWallet } from '@aztec/aztec.js/wallet';
 import { SchnorrAccountContract, getSchnorrAccountContractAddress } from '@aztec/accounts/schnorr';
 import { deriveSigningKey } from '@aztec/stdlib/keys';
-import { Fr } from '@aztec/aztec.js/fields';
-import { AztecAddress } from '@aztec/aztec.js/addresses';
+import { createPXE, getPXEConfig } from '@aztec/pxe/server';
+import { createStore } from '@aztec/kv-store/lmdb';
+import { SPONSORED_FPC_SALT } from '@aztec/constants';
+import { SponsoredFPCContract } from '@aztec/noir-contracts.js/SponsoredFPC';
 
 import WormholeJson from '../../../contracts/target/wormhole_contracts-Wormhole.json' with { type: 'json' };
 
 dotenv.config();
 
 const {
-  PXE_URL = 'https://devnet.aztec-labs.com',
-  NODE_URL = PXE_URL,
+  NODE_URL = 'https://devnet.aztec-labs.com',
   PRIVATE_KEY,
   SALT = '0x0000000000000000000000000000000000000000000000000000000000000000',
 } = process.env;
@@ -40,10 +42,6 @@ class PXEWallet extends BaseWallet {
     return this.account.getAddress();
   }
 
-  get address() {
-    return this.account.getAddress();
-  }
-
   async getAccounts() {
     const registered = await this.pxe.getRegisteredAccounts();
     return registered.map(({ address }) => ({ item: address, alias: '' }));
@@ -54,10 +52,6 @@ class PXEWallet extends BaseWallet {
       return this.account;
     }
     throw new Error(`Account ${address.toString()} not loaded in wallet`);
-  }
-
-  async createAuthWit(intent, isPrivate) {
-    return this.account.createAuthWit(intent, isPrivate);
   }
 }
 
@@ -103,45 +97,36 @@ async function setupWallet(pxe, nodeClient) {
   const signingKey = deriveSigningKey(secretKey);
 
   const accountContract = new SchnorrAccountContract(signingKey);
-
-  const accountManager = await AccountManager.create(
-    {
-      getChainInfo: async () => {
-        const { l1ChainId, rollupVersion } = await nodeClient.getNodeInfo();
-        return {
-          chainId: new Fr(l1ChainId),
-          version: new Fr(rollupVersion),
-        };
-      },
-      registerContract: async (instanceData, artifact) =>
-        pxe.registerContract({ instance: instanceData, artifact }),
+  const accountManager = await AccountManager.create({
+    getChainInfo: async () => {
+      const { l1ChainId, rollupVersion } = await nodeClient.getNodeInfo();
+      return {
+        chainId: new Fr(l1ChainId),
+        version: new Fr(rollupVersion),
+      };
     },
-    secretKey,
-    accountContract,
-    salt,
-  );
+    registerContract: async (instanceData, artifact) =>
+      pxe.registerContract({ instance: instanceData, artifact }),
+  }, secretKey, accountContract, salt);
 
   const completeAddress = await accountManager.getCompleteAddress();
-  const expectedAddress = await getSchnorrAccountContractAddress(secretKey, salt, signingKey);
-
-  if (!completeAddress.address.equals(expectedAddress)) {
-    console.warn(
-      `⚠️  Derived account address ${completeAddress.address.toString()} differs from expectation ${expectedAddress.toString()}`,
-    );
-  }
-
   const accountInstance = accountManager.getInstance();
   const accountArtifact = await accountContract.getContractArtifact();
 
   await pxe.registerContract({ instance: accountInstance, artifact: accountArtifact });
   await pxe.registerAccount(secretKey, completeAddress.partialAddress);
 
+  // Wait for PXE to sync account notes
+  console.log('⏳ Waiting for PXE to sync account notes...');
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
   const account = await accountManager.getAccount();
   return new PXEWallet(account, pxe, nodeClient);
 }
 
 async function main() {
-  console.log('🔄 Connecting to Aztec PXE...');
+  console.log('🔄 Connecting to Aztec devnet...');
+  
   const nodeClient = createAztecNodeClient(NODE_URL);
   const store = await createStore('pxe', {
     dataDirectory: join(__dirname, '..', 'store'),
@@ -149,10 +134,22 @@ async function main() {
   });
   const config = getPXEConfig();
   const pxe = await createPXE(nodeClient, config, { store });
-  console.log(`✅ Connected to PXE at ${PXE_URL}`);
+  console.log(`✅ Connected PXE to Aztec node`);
+
+  // Setup sponsored fee payment method
+  console.log('🔄 Setting up sponsored fee payment...');
+  const sponsoredFPC = await getContractInstanceFromInstantiationParams(SponsoredFPCContract.artifact, {
+    salt: new Fr(SPONSORED_FPC_SALT),
+  });
+  await pxe.registerContract({
+    instance: sponsoredFPC,
+    artifact: SponsoredFPCContract.artifact,
+  });
+  const paymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
+  console.log(`✅ Sponsored fee payment method configured`);
 
   const wallet = await setupWallet(pxe, nodeClient);
-  const senderAddress = wallet.address;
+  const senderAddress = wallet.getAddress();
   console.log(`👛 Using account ${senderAddress.toString()}`);
 
   const addresses = loadAddresses();
@@ -181,7 +178,10 @@ async function main() {
       senderAddress,
       new Fr(0n),
     )
-    .send()
+    .send({ 
+      from: senderAddress,
+      fee: { paymentMethod } 
+    })
     .wait();
 
   console.log(`✅ Private message published! Tx hash: ${tx.txHash}`);
