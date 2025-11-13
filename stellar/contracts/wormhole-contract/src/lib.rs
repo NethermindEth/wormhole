@@ -96,6 +96,7 @@ mod tests {
         testutils::{Address as _, Events},
         Address, Bytes, BytesN, Env,
     };
+    use soroban_sdk::testutils::arbitrary::std::println;
     use wormhole_interface::WormholeClient;
 
     fn setup() -> (Env, Address, WormholeClient<'static>) {
@@ -235,5 +236,43 @@ mod tests {
             last = s;
         }
         assert_eq!(client.sequence_of(&emitter), 10);
+    }
+
+    
+    #[test]
+    #[should_panic]
+    fn initialize_twice_panics() {
+        let (env, owner, client) = setup();
+        let other_owner = Address::generate(&env);
+        client.initialize(&other_owner);
+    }
+
+    #[test]
+    fn cost_of_publish_message() {
+        let (env, _owner, client) = setup();
+
+        let emitter = BytesN::<32>::from_array(&env, &[0xAA; 32]);
+        let payload = Bytes::from_array(&env, &[1, 2, 3, 4, 5, 6, 7, 8]);
+        let nonce = 7u32;
+        let consistency = 1u32;
+
+        env.cost_estimate().budget().reset_default();
+        env.cost_estimate().budget().reset_tracker();
+
+        let seq = client.publish_message(&emitter, &nonce, &payload, &consistency);
+        assert_eq!(seq, 1);
+
+        let budget = env.cost_estimate().budget();
+        let cpu = budget.cpu_instruction_cost();
+        let mem = budget.memory_bytes_cost();
+
+        budget.print();
+
+
+        println!(
+            "publish_message cost: cpu_insns={} mem_bytes={}",
+            cpu,
+            mem
+        );
     }
 }
