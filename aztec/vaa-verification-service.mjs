@@ -22,7 +22,7 @@ const PORT = process.env.PORT || 3000;
 // TESTNET CONFIGURATION
 const NODE_URL = process.env.NODE_URL || 'https://aztec-testnet-fullnode.zkv.xyz/';
 const PRIVATE_KEY = process.env.PRIVATE_KEY; // owner-wallet secret key from .env
-const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS || '0x0deaafe9735e7d6329a6c8e629b1b5a18dc395ceeba8154971498bf90dfdf429'; // Fresh Wormhole contract
+const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS || '0x2b13cff4daef709134419f1506ccae28956e02102a5ef5f2d0077e4991a9f493'; // Fresh Wormhole contract
 const SALT = process.env.SALT || '0x0000000000000000000000000000000000000000000000000000000000000000'; // Salt used in deployment
 
 let pxe, nodeClient, wormholeContract, paymentMethod, isReady = false;
