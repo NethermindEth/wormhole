@@ -14,6 +14,7 @@
   "type": "module",
   "scripts": {
     "start-verification": "node vaa-verification-service.mjs",
-    "send-private-message": "node packages/deploy/src/send-private-message.mjs"
+    "send-private-message": "node packages/deploy/src/send-private-message.mjs",
+    "test-send-message": "node scripts/test-send-message.mjs"
   }
 }
