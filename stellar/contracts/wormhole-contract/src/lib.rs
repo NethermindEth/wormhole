@@ -7,6 +7,7 @@ use wormhole_interface::{
 
 mod storage;
 mod utils;
+mod vaa;
 
 #[contract]
 pub struct Wormhole;
@@ -21,12 +22,13 @@ impl WormholeCoreInterface for Wormhole {
         todo!()
     }
 
-    fn verify_vaa(_env: Env, _vaa_bytes: Bytes) -> Result<(), WormholeError> {
-        todo!()
+    fn verify_vaa(env: Env, vaa_bytes: Bytes) -> Result<(), WormholeError> {
+        vaa::verify_vaa(env, vaa_bytes)?;
+        Ok(())
     }
 
-    fn parse_vaa(_env: Env, _vaa_bytes: Bytes) -> Result<VAA, WormholeError> {
-        todo!()
+    fn parse_vaa(env: Env, vaa_bytes: Bytes) -> Result<VAA, WormholeError> {
+        vaa::parse_vaa(&env, &vaa_bytes)
     }
 
     fn submit_contract_upgrade(_env: Env, _vaa_bytes: Bytes) -> Result<(), WormholeError> {
