@@ -4,14 +4,17 @@ use soroban_sdk::{Address, Bytes, BytesN, Env, Vec, contract, contractimpl};
 use wormhole_soroban_client::{
     ConsistencyLevel, GuardianSetInfo, WormholeCoreInterface, WormholeError,
 };
+use crate::governance::{
+    guardian_set::get_current_guardian_set_index, guardian_set::get_guardian_set, guardian_set::get_guardian_set_expiry,
+    GovernanceAction, GuardianSetUpgradeAction, SetMessageFeeAction, TransferFeesAction,
+};
 
 mod governance;
 mod initialize;
+mod message;
 mod storage;
 mod utils;
 mod vaa;
-
-use governance::{GovernanceAction, SetMessageFeeAction, TransferFeesAction};
 
 #[contract]
 pub struct Wormhole;
@@ -48,7 +51,7 @@ impl WormholeCoreInterface for Wormhole {
     }
 
     fn submit_guardian_set_upgrade(env: Env, vaa_bytes: Bytes) -> Result<(), WormholeError> {
-        governance::GuardianSetUpgradeAction::submit(&env, vaa_bytes)
+        GuardianSetUpgradeAction::submit(&env, vaa_bytes)
     }
 
     fn submit_set_message_fee(env: Env, vaa_bytes: Bytes) -> Result<(), WormholeError> {
@@ -60,33 +63,35 @@ impl WormholeCoreInterface for Wormhole {
     }
 
     fn post_message(
-        _env: Env,
-        _emitter: Address,
-        _nonce: u32,
-        _payload: Bytes,
-        _consistency_level: ConsistencyLevel,
+        env: Env,
+        emitter: Address,
+        nonce: u32,
+        payload: Bytes,
+        consistency_level: ConsistencyLevel,
     ) -> Result<u64, WormholeError> {
-        todo!()
+        emitter.require_auth();
+
+        message::post_message_with_fee(&env, &emitter, nonce, payload, consistency_level)
     }
 
     fn get_current_guardian_set_index(env: Env) -> u32 {
-        governance::guardian_set::get_current_index(&env)
+        get_current_guardian_set_index(&env)
     }
 
     fn get_guardian_set(env: Env, index: u32) -> Result<GuardianSetInfo, WormholeError> {
-        governance::guardian_set::get(&env, index)
+        get_guardian_set(&env, index)
     }
 
     fn get_guardian_set_expiry(env: Env, index: u32) -> Option<u64> {
-        governance::guardian_set::get_expiry(&env, index)
+        get_guardian_set_expiry(&env, index)
     }
 
-    fn get_emitter_sequence(_env: Env, _emitter: Address) -> u64 {
-        todo!()
+    fn get_emitter_sequence(env: Env, emitter: Address) -> u64 {
+        message::get_emitter_sequence(&env, &emitter)
     }
 
-    fn get_posted_message_hash(_env: Env, _emitter: Address, _sequence: u64) -> Option<BytesN<32>> {
-        todo!()
+    fn get_posted_message_hash(env: Env, emitter: Address, sequence: u64) -> Option<BytesN<32>> {
+        message::get_posted_message_hash(&env, &emitter, sequence)
     }
 
     fn get_message_fee(env: Env) -> u64 {
