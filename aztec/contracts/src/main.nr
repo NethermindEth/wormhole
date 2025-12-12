@@ -148,6 +148,8 @@ pub contract Wormhole {
         let receiver_address = storage.receiver_address.get_current_value();
         let token_address = storage.token_address.get_current_value();
 
+        
+
         // Only transfer tokens if fee is greater than 0
         if message_fee > 0 {
             let _ = Token::at(token_address)
@@ -155,9 +157,10 @@ pub contract Wormhole {
                 .call(&mut context);
         }
 
-        Wormhole::at(context.this_address())._publish_message(nonce, payloads, consistency).enqueue(
-            &mut context,
-        );
+        let sender = context.msg_sender().unwrap();
+        Wormhole::at(context.this_address())
+            ._publish_message(sender, nonce, payloads, consistency)
+            .enqueue(&mut context);
     }
 
     #[external("private")]
@@ -178,8 +181,7 @@ pub contract Wormhole {
         token_nonce: Field,
     ) {
         assert(0 <= message_fee, "insufficient fee");
-
-
+        
         // Only transfer tokens if fee is greater than 0
         if message_fee > 0 {
             let receiver_address = storage.receiver_address.get_current_value();
@@ -189,7 +191,9 @@ pub contract Wormhole {
                 .call(&mut context);
         }
 
+        let sender = context.msg_sender().unwrap();
         Wormhole::at(context.this_address())._publish_message_flat(
+            sender,
             nonce,
             payload_1,
             payload_2,
@@ -208,6 +212,7 @@ pub contract Wormhole {
     #[external("public")]
     #[internal]
     fn _publish_message_flat(
+        sender: AztecAddress,
         nonce: u64,
         payload_1: [u8; 31],
         payload_2: [u8; 31],
@@ -219,7 +224,6 @@ pub contract Wormhole {
         payload_8: [u8; 31],
         consistency: u8
     ) -> u64 {
-        let sender = context.msg_sender().unwrap();
         let sequence = storage.sequences.at(sender).read();
         storage.sequences.at(sender).write(sequence + 1);
 
@@ -245,8 +249,12 @@ pub contract Wormhole {
 
     #[external("public")]
     #[internal]
-    fn _publish_message(nonce: u64, payloads: [[u8; 31]; 8], consistency: u8) -> u64 {
-        let sender = context.msg_sender().unwrap();
+    fn _publish_message(
+        sender: AztecAddress,
+        nonce: u64,
+        payloads: [[u8; 31]; 8],
+        consistency: u8
+    ) -> u64 {
         let sequence = storage.sequences.at(sender).read();
         storage.sequences.at(sender).write(sequence + 1);
 
