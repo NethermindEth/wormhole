@@ -17,3 +17,6 @@ Cargo.lock
 
 # Code coverage output
 lcov.info
+
+# Soroban test snapshots
+**/test_snapshots/*
