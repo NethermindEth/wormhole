@@ -94,3 +94,100 @@ pub fn initialize(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Wormhole, WormholeClient};
+    use soroban_sdk::{IntoVal, Symbol, testutils::Events, vec};
+
+    #[test]
+    fn test_initialize_success() {
+        let env = Env::default();
+        let contract_id = env.register(Wormhole, ());
+        let client = WormholeClient::new(&env, &contract_id);
+
+        let guardian = BytesN::from_array(&env, &[0u8; 20]);
+        let initial_guardians = vec![&env, guardian.clone()];
+        let governance_emitter = BytesN::from_array(&env, &[1u8; 32]);
+
+        client.initialize(&initial_guardians, &governance_emitter);
+
+        let events = env.events().all();
+        assert_eq!(events.len(), 1);
+
+        let event = events.last().unwrap();
+        let topics = event.1.clone();
+        let t0: Symbol = topics.get(0).unwrap().into_val(&env);
+        let t1: Symbol = topics.get(1).unwrap().into_val(&env);
+        assert_eq!(t0, Symbol::new(&env, "wormhole_core"));
+        assert_eq!(t1, Symbol::new(&env, "init"));
+
+        assert_eq!(event.0, contract_id);
+
+        assert!(client.is_initialized());
+        assert_eq!(client.get_current_guardian_set_index(), 0);
+        let set = client.get_guardian_set(&0);
+        assert_eq!(set.keys.len(), 1);
+        assert_eq!(set.keys.get(0).unwrap(), guardian);
+    }
+
+    #[test]
+    fn test_initialize_empty_guardians() {
+        let env = Env::default();
+        let contract_id = env.register(Wormhole, ());
+        let client = WormholeClient::new(&env, &contract_id);
+
+        let initial_guardians: Vec<BytesN<20>> = Vec::new(&env);
+        let governance_emitter = BytesN::from_array(&env, &[1u8; 32]);
+
+        let res = client.try_initialize(&initial_guardians, &governance_emitter);
+        assert_eq!(res, Err(Ok(WormholeError::EmptyGuardianSet)));
+
+        let events = env.events().all();
+        assert_eq!(events.len(), 0);
+
+        assert!(!client.is_initialized());
+    }
+
+    #[test]
+    fn test_initialize_already_initialized() {
+        let env = Env::default();
+        let contract_id = env.register(Wormhole, ());
+        let client = WormholeClient::new(&env, &contract_id);
+
+        let guardian = BytesN::from_array(&env, &[0u8; 20]);
+        let initial_guardians = vec![&env, guardian];
+        let governance_emitter = BytesN::from_array(&env, &[1u8; 32]);
+
+        client.initialize(&initial_guardians, &governance_emitter);
+
+        let events = env.events().all();
+        assert_eq!(events.len(), 1);
+
+        let res2 = client.try_initialize(&initial_guardians, &governance_emitter);
+        assert_eq!(res2, Err(Ok(WormholeError::AlreadyInitialized)));
+
+        let events_after_fail = env.events().all();
+        assert_eq!(events_after_fail.len(), 0);
+
+        assert!(client.is_initialized());
+    }
+
+    #[test]
+    fn test_is_initialized_flag() {
+        let env = Env::default();
+        let contract_id = env.register(Wormhole, ());
+        let client = WormholeClient::new(&env, &contract_id);
+
+        assert!(!client.is_initialized());
+
+        let guardian = BytesN::from_array(&env, &[0u8; 20]);
+        let initial_guardians = vec![&env, guardian];
+        let governance_emitter = BytesN::from_array(&env, &[1u8; 32]);
+
+        client.initialize(&initial_guardians, &governance_emitter);
+
+        assert!(client.is_initialized());
+    }
+}

@@ -126,3 +126,206 @@ pub fn verify_vaa(env: &Env, vaa_bytes: &Bytes) -> Result<bool, WormholeError> {
 pub fn parse_vaa(env: &Env, vaa_bytes: &Bytes) -> Result<VAA, WormholeError> {
     VAA::try_from((env, vaa_bytes))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::vec;
+    use wormhole_soroban_client::ConsistencyLevel;
+    #[test]
+    fn test_parse_vaa_valid() {
+        let env = Env::default();
+        let contract_id = env.register(crate::Wormhole, ());
+        let client = crate::WormholeClient::new(&env, &contract_id);
+
+        // Known fields
+        let version_u8: u8 = 1;
+        let guardian_set_index: u32 = 5;
+        let num_signatures_u8: u8 = 0;
+
+        let timestamp: u32 = 0x01020304;
+        let nonce: u32 = 0xA0B0C0D0;
+        let emitter_chain_u16: u16 = 61;
+        let emitter_address_arr: [u8; 32] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B,
+            0x1C, 0x1D, 0x1E, 0x1F,
+        ];
+        let sequence: u64 = 0x0102030405060708;
+        let consistency_level_u8: u8 = ConsistencyLevel::Confirmed as u8;
+        let payload: [u8; 2] = [0xAA, 0xBB];
+
+        let mut raw = Bytes::new(&env);
+
+        raw.append(&Bytes::from_slice(&env, &[version_u8]));
+        raw.append(&Bytes::from_slice(&env, &guardian_set_index.to_be_bytes()));
+        raw.append(&Bytes::from_slice(&env, &[num_signatures_u8]));
+        // signatures: none
+
+        raw.append(&Bytes::from_slice(&env, &timestamp.to_be_bytes()));
+        raw.append(&Bytes::from_slice(&env, &nonce.to_be_bytes()));
+        raw.append(&Bytes::from_slice(&env, &emitter_chain_u16.to_be_bytes()));
+        raw.append(&Bytes::from_slice(&env, &emitter_address_arr));
+        raw.append(&Bytes::from_slice(&env, &sequence.to_be_bytes()));
+        raw.append(&Bytes::from_slice(&env, &[consistency_level_u8]));
+        raw.append(&Bytes::from_slice(&env, &payload));
+
+        let vaa = client.parse_vaa(&raw);
+
+        assert_eq!(vaa.version, u32::from(version_u8));
+        assert_eq!(vaa.guardian_set_index, guardian_set_index);
+        assert_eq!(vaa.signatures.len(), 0);
+
+        assert_eq!(vaa.timestamp, timestamp);
+        assert_eq!(vaa.nonce, nonce);
+        assert_eq!(vaa.emitter_chain, u32::from(emitter_chain_u16));
+
+        let expected_emitter_address = BytesN::<32>::from_array(&env, &emitter_address_arr);
+        assert_eq!(vaa.emitter_address, expected_emitter_address);
+
+        assert_eq!(vaa.sequence, sequence);
+        assert_eq!(vaa.consistency_level, ConsistencyLevel::Confirmed);
+
+        let expected_payload = Bytes::from_slice(&env, &payload);
+        assert_eq!(vaa.payload, expected_payload);
+    }
+
+    #[test]
+    fn test_parse_vaa_invalid_format() {
+        let env = Env::default();
+        let contract_id = env.register(crate::Wormhole, ());
+        let client = crate::WormholeClient::new(&env, &contract_id);
+
+        let b0 = Bytes::new(&env);
+        let r0 = client.try_parse_vaa(&b0);
+        assert_eq!(r0, Err(Ok(WormholeError::InvalidVAAFormat)));
+
+        let b1 = Bytes::from_slice(&env, &[0u8; 56]);
+        let r1 = client.try_parse_vaa(&b1);
+        assert_eq!(r1, Err(Ok(WormholeError::InvalidVAAFormat)));
+
+        let mut b2 = Bytes::new(&env);
+
+        // header
+        b2.append(&Bytes::from_slice(&env, &[1u8])); // version
+        b2.append(&Bytes::from_slice(&env, &0u32.to_be_bytes())); // guardian_set_index
+        b2.append(&Bytes::from_slice(&env, &[1u8])); // num_signatures = 1
+
+        // body (51 bytes), payload empty
+        b2.append(&Bytes::from_slice(&env, &0u32.to_be_bytes())); // timestamp
+        b2.append(&Bytes::from_slice(&env, &0u32.to_be_bytes())); // nonce
+        b2.append(&Bytes::from_slice(&env, &0u16.to_be_bytes())); // emitter_chain
+        b2.append(&Bytes::from_slice(&env, &[0u8; 32])); // emitter_address
+        b2.append(&Bytes::from_slice(&env, &0u64.to_be_bytes())); // sequence
+        b2.append(&Bytes::from_slice(&env, &[0u8])); // consistency_level
+
+        let r2 = client.try_parse_vaa(&b2);
+        assert_eq!(r2, Err(Ok(WormholeError::InvalidVAAFormat)));
+    }
+
+    #[test]
+    fn test_get_body_bytes_function() {
+        let env = Env::default();
+
+        let mut raw = Bytes::new(&env);
+
+        // header (6 bytes)
+        raw.append(&Bytes::from_slice(&env, &[1u8])); // version
+        raw.append(&Bytes::from_slice(&env, &5u32.to_be_bytes())); // guardian_set_index
+        raw.append(&Bytes::from_slice(&env, &[0u8])); // sig_count = 0
+
+        // body (51 + payload)
+        raw.append(&Bytes::from_slice(&env, &0x01020304u32.to_be_bytes())); // timestamp
+        raw.append(&Bytes::from_slice(&env, &0xA0B0C0D0u32.to_be_bytes())); // nonce
+        raw.append(&Bytes::from_slice(&env, &61u16.to_be_bytes())); // emitter_chain
+        raw.append(&Bytes::from_slice(&env, &[0x11u8; 32])); // emitter_address
+        raw.append(&Bytes::from_slice(
+            &env,
+            &0x0102030405060708u64.to_be_bytes(),
+        )); // sequence
+        raw.append(&Bytes::from_slice(
+            &env,
+            &[ConsistencyLevel::Confirmed as u8],
+        ));
+        raw.append(&Bytes::from_slice(&env, &[0xAAu8, 0xBBu8, 0xCCu8])); // payload
+
+        let body = VAA::get_body_bytes(&raw).expect("expected valid body bytes");
+
+        let mut expected_body = Bytes::new(&env);
+        expected_body.append(&Bytes::from_slice(&env, &0x01020304u32.to_be_bytes())); // timestamp
+        expected_body.append(&Bytes::from_slice(&env, &0xA0B0C0D0u32.to_be_bytes())); // nonce
+        expected_body.append(&Bytes::from_slice(&env, &61u16.to_be_bytes())); // emitter_chain
+        expected_body.append(&Bytes::from_slice(&env, &[0x11u8; 32])); // emitter_address
+        expected_body.append(&Bytes::from_slice(
+            &env,
+            &0x0102030405060708u64.to_be_bytes(),
+        )); // sequence
+        expected_body.append(&Bytes::from_slice(
+            &env,
+            &[ConsistencyLevel::Confirmed as u8],
+        ));
+        expected_body.append(&Bytes::from_slice(&env, &[0xAAu8, 0xBBu8, 0xCCu8])); // payload
+
+        assert_eq!(body, expected_body);
+
+        let too_short = Bytes::from_slice(&env, &[1u8, 2u8, 3u8, 4u8, 5u8]);
+        let r0 = VAA::get_body_bytes(&too_short);
+        assert_eq!(r0, Err(WormholeError::InvalidVAAFormat));
+
+        let mut corrupt = Bytes::new(&env);
+
+        corrupt.append(&Bytes::from_slice(&env, &[1u8]));
+        corrupt.append(&Bytes::from_slice(&env, &0u32.to_be_bytes()));
+        corrupt.append(&Bytes::from_slice(&env, &[1u8]));
+
+        // body (51 bytes), payload empty
+        corrupt.append(&Bytes::from_slice(&env, &0u32.to_be_bytes())); // timestamp
+        corrupt.append(&Bytes::from_slice(&env, &0u32.to_be_bytes())); // nonce
+        corrupt.append(&Bytes::from_slice(&env, &0u16.to_be_bytes())); // emitter_chain
+        corrupt.append(&Bytes::from_slice(&env, &[0u8; 32])); // emitter_address
+        corrupt.append(&Bytes::from_slice(&env, &0u64.to_be_bytes())); // sequence
+        corrupt.append(&Bytes::from_slice(&env, &[0u8])); // consistency_level
+
+        let r1 = VAA::get_body_bytes(&corrupt);
+        assert_eq!(r1, Err(WormholeError::InvalidVAAFormat));
+    }
+
+    #[test]
+    fn test_verify_vaa_insufficient_sigs() {
+        let env = Env::default();
+        let contract_id = env.register(crate::Wormhole, ());
+        let client = crate::WormholeClient::new(&env, &contract_id);
+
+        let g0 = BytesN::<20>::from_array(&env, &[0u8; 20]);
+        let g1 = BytesN::<20>::from_array(&env, &[1u8; 20]);
+        let g2 = BytesN::<20>::from_array(&env, &[2u8; 20]);
+        let initial_guardians = vec![&env, g0, g1, g2];
+
+        let governance_emitter = BytesN::<32>::from_array(&env, &[9u8; 32]);
+        client.initialize(&initial_guardians, &governance_emitter);
+
+        let mut sigs = Vec::<Signature>::new(&env);
+        sigs.push_back(Signature {
+            guardian_index: 0,
+            r: BytesN::<32>::from_array(&env, &[0u8; 32]),
+            s: BytesN::<32>::from_array(&env, &[0u8; 32]),
+            v: 0,
+        });
+
+        let vaa = VAA {
+            version: 1,
+            guardian_set_index: 0,
+            signatures: sigs,
+            timestamp: 0,
+            nonce: 0,
+            emitter_chain: 61,
+            emitter_address: BytesN::<32>::from_array(&env, &[0x11u8; 32]),
+            sequence: 0,
+            consistency_level: ConsistencyLevel::Confirmed,
+            payload: Bytes::from_slice(&env, &[0xAA, 0xBB]),
+        };
+
+        let res = env.as_contract(&contract_id, || verify_vaa_signatures(&vaa, &env));
+        assert_eq!(res, Err(WormholeError::InsufficientSignatures));
+    }
+}
