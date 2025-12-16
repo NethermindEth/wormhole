@@ -328,4 +328,67 @@ mod tests {
         let res = env.as_contract(&contract_id, || verify_vaa_signatures(&vaa, &env));
         assert_eq!(res, Err(WormholeError::InsufficientSignatures));
     }
+
+    #[test]
+    fn test_verify_vaa_invalid_signature() {
+        let env = Env::default();
+        let contract_id = env.register(crate::Wormhole, ());
+        let client = crate::WormholeClient::new(&env, &contract_id);
+
+        let stored_guardian = BytesN::<20>::from_array(&env, &[0x11u8; 20]);
+        let initial_guardians = soroban_sdk::vec![&env, stored_guardian];
+        let governance_emitter = BytesN::<32>::from_array(&env, &[0x22u8; 32]);
+        client.initialize(&initial_guardians, &governance_emitter);
+
+        let base_vaa = VAA {
+            version: 1,
+            guardian_set_index: 0,
+            signatures: Vec::new(&env),
+            timestamp: 0x01020304,
+            nonce: 0xA0B0C0D0,
+            emitter_chain: 61,
+            emitter_address: BytesN::<32>::from_array(&env, &[0x33u8; 32]),
+            sequence: 7,
+            consistency_level: ConsistencyLevel::Confirmed,
+            payload: Bytes::from_slice(&env, &[0xAA, 0xBB]),
+        };
+
+        let body_bytes = base_vaa.serialize_body(&env);
+        let body_hash_bytes: Bytes = crate::utils::keccak256_hash(&env, &body_bytes).into();
+        let double_hash = env.crypto().keccak256(&body_hash_bytes);
+        let msg32: [u8; 32] = double_hash.to_array();
+
+
+        let secp = secp256k1::Secp256k1::new();
+
+        let sk = secp256k1::SecretKey::from_secret_bytes([0x42u8; 32]).unwrap();
+
+        let message = secp256k1::Message::from_digest(msg32);
+
+        let sig = secp.sign_ecdsa_recoverable(message, &sk);
+        let (recid, compact64) = sig.serialize_compact();
+
+        let mut r_arr = [0u8; 32];
+        let mut s_arr = [0u8; 32];
+        r_arr.copy_from_slice(&compact64[0..32]);
+        s_arr.copy_from_slice(&compact64[32..64]);
+
+        let sig_entry = Signature {
+            guardian_index: 0,
+            r: BytesN::<32>::from_array(&env, &r_arr),
+            s: BytesN::<32>::from_array(&env, &s_arr),
+            v: recid.to_u8() as u32,
+        };
+
+        let mut sigs = Vec::new(&env);
+        sigs.push_back(sig_entry);
+
+        let mut vaa = base_vaa.clone();
+        vaa.signatures = sigs;
+
+        env.as_contract(&contract_id, || {
+            let res = verify_vaa_signatures(&vaa, &env);
+            assert_eq!(res, Err(WormholeError::InvalidSignature));
+        });
+    }
 }

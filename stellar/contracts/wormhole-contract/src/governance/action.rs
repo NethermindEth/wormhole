@@ -120,3 +120,115 @@ pub fn validate_governance_header(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{Bytes, BytesN, Env};
+    use wormhole_soroban_client::{CHAIN_ID_STELLAR, MODULE_CORE, WormholeError};
+    use crate::governance::{GovernanceAction, TransferFeesAction};
+
+    #[test]
+    fn test_governance_header_validation() {
+        let env = Env::default();
+
+        fn mk_payload(env: &Env, module: BytesN<32>, action: u8, chain: u16) -> Bytes {
+            let mut b = Bytes::new(env);
+            b.append(&module.into());
+            b.append(&Bytes::from_slice(env, &[action]));
+            b.append(&Bytes::from_slice(env, &chain.to_be_bytes()));
+            b.append(&Bytes::from_slice(env, &[0u8]));
+            b
+        }
+
+        let expected_action: u8 = 4;
+
+        {
+            let mut not_core_arr = [0u8; 32];
+            not_core_arr[0..7].copy_from_slice(b"NotCore");
+            let not_core = BytesN::from_array(&env, &not_core_arr);
+
+            let payload = mk_payload(&env, not_core.clone(), expected_action, CHAIN_ID_STELLAR);
+            let parsed = <TransferFeesAction as GovernanceAction>::Payload::try_from((&env, &payload));
+
+            if let Ok(p) = parsed {
+                let r = <TransferFeesAction as GovernanceAction>::validate_payload(&env, &p);
+                assert_eq!(r, Err(WormholeError::InvalidGovernanceModule));
+            } else {
+                let r = validate_governance_header(
+                    &not_core,
+                    expected_action,
+                    CHAIN_ID_STELLAR,
+                    expected_action,
+                );
+                assert_eq!(r, Err(WormholeError::InvalidGovernanceModule));
+            }
+        }
+
+        {
+            let wrong_action: u8 = 0xFF;
+            let payload = mk_payload(
+                &env,
+                BytesN::from_array(&env, &MODULE_CORE),
+                wrong_action,
+                CHAIN_ID_STELLAR,
+            );
+            let parsed = <TransferFeesAction as GovernanceAction>::Payload::try_from((&env, &payload));
+
+            if let Ok(p) = parsed {
+                let r = <TransferFeesAction as GovernanceAction>::validate_payload(&env, &p);
+                assert_eq!(r, Err(WormholeError::InvalidGovernanceAction));
+            } else {
+                let r = validate_governance_header(
+                    &BytesN::from_array(&env, &MODULE_CORE),
+                    wrong_action,
+                    CHAIN_ID_STELLAR,
+                    expected_action,
+                );
+                assert_eq!(r, Err(WormholeError::InvalidGovernanceAction));
+            }
+        }
+
+        {
+            let chain_wrong: u16 = 1;
+            let payload = mk_payload(
+                &env,
+                BytesN::from_array(&env, &MODULE_CORE),
+                expected_action,
+                chain_wrong,
+            );
+            let parsed = <TransferFeesAction as GovernanceAction>::Payload::try_from((&env, &payload));
+
+            if let Ok(p) = parsed {
+                let r = <TransferFeesAction as GovernanceAction>::validate_payload(&env, &p);
+                assert_eq!(r, Err(WormholeError::InvalidGovernanceChain));
+            } else {
+                let r = validate_governance_header(
+                    &BytesN::from_array(&env, &MODULE_CORE),
+                    expected_action,
+                    chain_wrong,
+                    expected_action,
+                );
+                assert_eq!(r, Err(WormholeError::InvalidGovernanceChain));
+            }
+        }
+
+        {
+            let r0 = validate_governance_header(
+                &BytesN::from_array(&env, &MODULE_CORE),
+                expected_action,
+                0,
+                expected_action,
+            );
+            assert!(r0.is_ok());
+
+            let r1 = validate_governance_header(
+                &BytesN::from_array(&env, &MODULE_CORE),
+                expected_action,
+                CHAIN_ID_STELLAR,
+                expected_action,
+            );
+            assert!(r1.is_ok());
+        }
+    }
+}

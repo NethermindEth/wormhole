@@ -18,3 +18,4 @@ soroban-sdk = { workspace = true, features = ["testutils"] }
 base64 = { workspace = true }
 serde_json = { workspace = true }
 hex = { workspace = true }
+secp256k1 = { version = "0.32.0-beta.2", default-features = false, features = ["alloc", "recovery"] }
