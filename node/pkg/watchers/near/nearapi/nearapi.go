@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	nearRPCTimeout = 5 * time.Second
+	nearRPCTimeout = 20 * time.Second
 	/*
 		NEAR JSON RPC node is starting up with 4 workers
 		(https://github.com/near/nearcore/blob/8dc9a0bab8aa4648fc7af777e9fa7e3e545c95a5/chain/jsonrpc/src/lib.rs#L1372)
@@ -42,6 +42,7 @@ type (
 		GetFinalBlock(ctx context.Context) (Block, error)
 		GetChunk(ctx context.Context, chunkHeader ChunkHeader) (Chunk, error)
 		GetTxStatus(ctx context.Context, txHash string, senderAccountId string) ([]byte, error)
+		GetVersion(ctx context.Context) (string, error)
 	}
 	NearApiImpl struct {
 		nearRPC NearRpc
@@ -174,6 +175,21 @@ func (n NearApiImpl) GetChunk(ctx context.Context, chunkHeader ChunkHeader) (Chu
 func (n NearApiImpl) GetTxStatus(ctx context.Context, txHash string, senderAccountId string) ([]byte, error) {
 	s := fmt.Sprintf(`{"id": "dontcare", "jsonrpc": "2.0", "method": "tx", "params": ["%s", "%s"]}`, txHash, senderAccountId)
 	return n.nearRPC.Query(ctx, s)
+}
+
+func (n NearApiImpl) GetVersion(ctx context.Context) (string, error) {
+	s := `{"id": "dontcare", "jsonrpc": "2.0", "method": "status"}`
+	versionBytes, err := n.nearRPC.Query(ctx, s)
+	if err != nil {
+		return "", err
+	}
+
+	version, err := VersionFromBytes(versionBytes)
+	if err != nil {
+		return "", err
+	}
+
+	return version, nil
 }
 
 func IsWellFormedHash(hash string) error {

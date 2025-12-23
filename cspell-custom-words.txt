@@ -19,11 +19,18 @@ behaviour
 Berachain
 bigset
 Bigtable
+Blackhole
+blackhole
+blackholed
 borsh
 bscscan
 BUILDKIT
 bytecodes
 callstack
+Blackhole
+Blackholed
+blackholing
+blackholed
 ccqlistener
 CCTP
 celestia
@@ -114,6 +121,8 @@ localnet
 localterra
 lockfiles
 marshal
+megaETH
+MegaETH
 merkle
 Metaplex
 mezo
@@ -220,6 +229,7 @@ vimdiff
 vphash
 wasmhooks
 wasms
+WebSocket
 WORKDIR
 worldchain
 WorldChain

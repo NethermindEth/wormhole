@@ -40,5 +40,8 @@ func ChainList() []ChainConfigEntry {
 		{EmitterChainID: vaa.ChainIDMezo, DailyLimit: 500_000, BigTransactionSize: 50_000},
 		{EmitterChainID: vaa.ChainIDXRPLEVM, DailyLimit: 500_000, BigTransactionSize: 50_000},
 		{EmitterChainID: vaa.ChainIDLinea, DailyLimit: 500_000, BigTransactionSize: 50_000},
+		{EmitterChainID: vaa.ChainIDFogo, DailyLimit: 500_000, BigTransactionSize: 50_000},
+		{EmitterChainID: vaa.ChainIDMonad, DailyLimit: 500_000, BigTransactionSize: 50_000},
+		{EmitterChainID: vaa.ChainIDMegaETH, DailyLimit: 500_000, BigTransactionSize: 50_000},
 	}
 }

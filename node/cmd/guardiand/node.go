@@ -221,6 +221,12 @@ var (
 	creditCoinRPC      *string
 	creditCoinContract *string
 
+	mocaRPC      *string
+	mocaContract *string
+
+	megaEthRPC      *string
+	megaEthContract *string
+
 	sepoliaRPC      *string
 	sepoliaContract *string
 
@@ -294,7 +300,8 @@ var (
 	txVerifierChains []vaa.ChainID
 
 	// featureFlags are additional static flags that should be published in P2P heartbeats.
-	featureFlags []string
+	featureFlags  []string
+	notaryEnabled *bool
 )
 
 func init() {
@@ -470,6 +477,12 @@ func init() {
 	creditCoinRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "creditCoinRPC", "CREDITCOIN RPC_URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
 	creditCoinContract = NodeCmd.Flags().String("creditCoinContract", "", "CreditCoin contract address")
 
+	mocaRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "mocaRPC", "Moca RPC_URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
+	mocaContract = NodeCmd.Flags().String("mocaContract", "", "Moca contract address")
+
+	megaEthRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "megaEthRPC", "MegaETH RPC_URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
+	megaEthContract = NodeCmd.Flags().String("megaEthContract", "", "MegaETH contract address")
+
 	arbitrumSepoliaRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "arbitrumSepoliaRPC", "Arbitrum on Sepolia RPC URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
 	arbitrumSepoliaContract = NodeCmd.Flags().String("arbitrumSepoliaContract", "", "Arbitrum on Sepolia contract address")
 
@@ -526,6 +539,8 @@ func init() {
 	subscribeToVAAs = NodeCmd.Flags().Bool("subscribeToVAAs", false, "Guardiand should subscribe to incoming signed VAAs, set to true if running a public RPC node")
 
 	transferVerifierEnabledChainIDs = NodeCmd.Flags().UintSlice("transferVerifierEnabledChainIDs", make([]uint, 0), "Transfer Verifier will be enabled for these chain IDs (comma-separated)")
+
+	notaryEnabled = NodeCmd.Flags().Bool("notaryEnabled", false, "Run the notary")
 }
 
 var (
@@ -640,6 +655,7 @@ func runNode(cmd *cobra.Command, args []string) {
 	}
 
 	// Override the default go-log config, which uses a magic environment variable.
+	logger.Info("setting level for all loggers", zap.String("level", logger.Level().String()))
 	ipfslog.SetAllLoggers(lvl)
 
 	if viper.ConfigFileUsed() != "" {
@@ -868,6 +884,8 @@ func runNode(cmd *cobra.Command, args []string) {
 	*xrplEvmContract = checkEvmArgs(logger, *xrplEvmRPC, *xrplEvmContract, vaa.ChainIDXRPLEVM)
 	*plasmaContract = checkEvmArgs(logger, *plasmaRPC, *plasmaContract, vaa.ChainIDPlasma)
 	*creditCoinContract = checkEvmArgs(logger, *creditCoinRPC, *creditCoinContract, vaa.ChainIDCreditCoin)
+	*mocaContract = checkEvmArgs(logger, *mocaRPC, *mocaContract, vaa.ChainIDMoca)
+	*megaEthContract = checkEvmArgs(logger, *megaEthRPC, *megaEthContract, vaa.ChainIDMegaETH)
 
 	// These chains will only ever be testnet / devnet.
 	*sepoliaContract = checkEvmArgs(logger, *sepoliaRPC, *sepoliaContract, vaa.ChainIDSepolia)
@@ -1590,6 +1608,28 @@ func runNode(cmd *cobra.Command, args []string) {
 		watcherConfigs = append(watcherConfigs, wc)
 	}
 
+	if shouldStart(mocaRPC) {
+		wc := &evm.WatcherConfig{
+			NetworkID:        "moca",
+			ChainID:          vaa.ChainIDMoca,
+			Rpc:              *mocaRPC,
+			Contract:         *mocaContract,
+			CcqBackfillCache: *ccqBackfillCache,
+		}
+		watcherConfigs = append(watcherConfigs, wc)
+	}
+
+	if shouldStart(megaEthRPC) {
+		wc := &evm.WatcherConfig{
+			NetworkID:        "megaeth",
+			ChainID:          vaa.ChainIDMegaETH,
+			Rpc:              *megaEthRPC,
+			Contract:         *megaEthContract,
+			CcqBackfillCache: *ccqBackfillCache,
+		}
+		watcherConfigs = append(watcherConfigs, wc)
+	}
+
 	if shouldStart(terraWS) {
 		if env != common.UnsafeDevNet {
 			logger.Fatal("Terra classic is only allowed in unsafe dev mode")
@@ -1681,10 +1721,11 @@ func runNode(cmd *cobra.Command, args []string) {
 
 	if shouldStart(suiRPC) {
 		wc := &sui.WatcherConfig{
-			NetworkID:        "sui",
-			ChainID:          vaa.ChainIDSui,
-			Rpc:              *suiRPC,
-			SuiMoveEventType: *suiMoveEventType,
+			NetworkID:         "sui",
+			ChainID:           vaa.ChainIDSui,
+			Rpc:               *suiRPC,
+			SuiMoveEventType:  *suiMoveEventType,
+			TxVerifierEnabled: slices.Contains(txVerifierChains, vaa.ChainIDSui),
 		}
 		watcherConfigs = append(watcherConfigs, wc)
 	}
@@ -1889,6 +1930,7 @@ func runNode(cmd *cobra.Command, args []string) {
 		node.GuardianOptionWatchers(watcherConfigs, ibcWatcherConfig),
 		node.GuardianOptionAccountant(*accountantWS, *accountantContract, *accountantCheckEnabled, accountantWormchainConn, *accountantNttContract, accountantNttWormchainConn),
 		node.GuardianOptionGovernor(*chainGovernorEnabled, *governorFlowCancelEnabled, *coinGeckoApiKey),
+		node.GuardianOptionNotary(*notaryEnabled),
 		node.GuardianOptionGatewayRelayer(*gatewayRelayerContract, gatewayRelayerWormchainConn),
 		node.GuardianOptionQueryHandler(*ccqEnabled, *ccqAllowedRequesters),
 		node.GuardianOptionAdminService(*adminSocketPath, ethRPC, ethContract, rpcMap),
