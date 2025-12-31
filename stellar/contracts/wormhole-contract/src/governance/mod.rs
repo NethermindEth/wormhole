@@ -1,3 +1,14 @@
+//! Governance action processing for the Wormhole Core contract.
+//!
+//! Implements the four governance actions defined by Wormhole:
+//! - Contract upgrade (action 1)
+//! - Guardian set upgrade (action 2)
+//! - Set message fee (action 3)
+//! - Transfer fees (action 4)
+//!
+//! All actions require VAAs signed by a quorum of guardians and originating
+//! from the governance chain (Solana) and emitter address.
+
 mod action;
 mod contract_upgrade;
 pub mod guardian_set;
@@ -14,6 +25,9 @@ use crate::initialize;
 use soroban_sdk::{Bytes, Env};
 use wormhole_soroban_client::WormholeError;
 
+/// Checks if a governance VAA has been consumed (replay protection).
+///
+/// Returns `Ok(())` if not consumed, `Err(GovernanceVAAAlreadyConsumed)` if already used.
 pub fn is_governance_vaa_consumed(env: Env, vaa_bytes: Bytes) -> Result<(), WormholeError> {
     initialize::require_initialized(&env)?;
     if action::is_governance_vaa_consumed_from_bytes(&env, &vaa_bytes)? {
