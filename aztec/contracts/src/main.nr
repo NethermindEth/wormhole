@@ -21,7 +21,7 @@ pub contract Wormhole {
     use dep::keccak256::keccak256;
 
     use dep::aztec::{
-        macros::{functions::{initializer, internal, external}, storage::storage},
+        macros::{functions::{initializer, only_self, external}, storage::storage},
         state_vars::{map::Map, public_mutable::PublicMutable, delayed_public_mutable::DelayedPublicMutable},
         protocol_types::{
             address::AztecAddress,
