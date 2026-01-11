@@ -1,4 +1,4 @@
-use dep::aztec::macros::aztec;
+use aztec::macros::aztec;
 mod structs;
 
 /*
@@ -20,12 +20,11 @@ pub contract Wormhole {
     use crate::structs::{Guardian, Provider, Signature, WormholeStorage};
     use dep::keccak256::keccak256;
 
-    use dep::aztec::{
-        macros::{functions::{initializer, only_self, external}, storage::storage},
-        state_vars::{map::Map, public_mutable::PublicMutable, delayed_public_mutable::DelayedPublicMutable},
-        protocol_types::{
-            address::AztecAddress,
-            traits::ToField,
+    use aztec::{
+        macros::{functions::{external, initializer, only_self}, storage::storage},
+        protocol_types::{address::AztecAddress, traits::ToField},
+        state_vars::{
+            delayed_public_mutable::DelayedPublicMutable, map::Map, public_mutable::PublicMutable,
         },
     };
 
@@ -105,9 +104,9 @@ pub contract Wormhole {
 
         // Only transfer tokens if fee is greater than 0
         if message_fee > 0 {
-            let _ = self.call(
-                Token::at(token_address).transfer_in_public(from, receiver_address, message_fee, token_nonce),
-            );
+            Token::at(token_address)
+                .transfer_in_public(from, receiver_address, message_fee, token_nonce)
+                .call(self.context);
         }
 
         let sender = self.msg_sender().unwrap();
@@ -150,9 +149,9 @@ pub contract Wormhole {
 
         // Only transfer tokens if fee is greater than 0
         if message_fee > 0 {
-            let _ = self.call(
-                Token::at(token_address).transfer_in_private(from, receiver_address, message_fee, token_nonce),
-            );
+            Token::at(token_address)
+                .transfer_in_private(from, receiver_address, message_fee, token_nonce)
+                .call(self.context);
         }
 
         self.enqueue_self._publish_message(nonce, payloads, consistency);
@@ -177,14 +176,13 @@ pub contract Wormhole {
     ) {
         assert(0 <= message_fee, "insufficient fee");
 
-
         // Only transfer tokens if fee is greater than 0
         if message_fee > 0 {
             let receiver_address = self.storage.receiver_address.get_current_value();
             let token_address = self.storage.token_address.get_current_value();
-            let _ = self.call(
-                Token::at(token_address).transfer_in_private(from, receiver_address, message_fee, token_nonce),
-            );
+            Token::at(token_address)
+                .transfer_in_private(from, receiver_address, message_fee, token_nonce)
+                .call(self.context);
         }
 
         self.enqueue_self._publish_message_flat(
@@ -213,7 +211,7 @@ pub contract Wormhole {
         payload_6: [u8; 31],
         payload_7: [u8; 31],
         payload_8: [u8; 31],
-        consistency: u8
+        consistency: u8,
     ) -> u64 {
         let sender = self.msg_sender().unwrap();
         let sequence = self.storage.sequences.at(sender).read();
@@ -269,8 +267,9 @@ pub contract Wormhole {
     // ============================================================================
     // CORE FUNCTIONALITY - VAA VERIFICATION
     // ============================================================================
-    
-    #[external("utility")]
+
+    // Internal helper function for parsing VAA bytes
+    #[contract_library_method]
     unconstrained fn parse_vaa_unconstrained(
         bytes: [u8; 2000],
         actual_length: u32,
@@ -312,7 +311,8 @@ pub contract Wormhole {
         (guardian_set_index, signatures_len, signatures, body_bytes, body_length)
     }
 
-    #[external("utility")]
+    // Internal helper function for computing VAA hash
+    #[contract_library_method]
     unconstrained fn compute_vaa_hash_unconstrained(
         body_bytes: [u8; 1860],
         body_length: u32,
@@ -392,7 +392,7 @@ pub contract Wormhole {
                 signature_bytes_array[i as u32] = signature_bytes;
             }
         }
-        
+
         (pub_keys_x, pub_keys_y, signature_bytes_array, hash, signatures_len)
     }
 
@@ -409,7 +409,7 @@ pub contract Wormhole {
 
         // TODO: Uncomment this when ECDSA verification in loop is implemented.
         // See issue: https://github.com/noir-lang/noir/pull/8993
-        
+
         // for i in 0..13 {
         //     if i < signatures_len {
         //        let is_valid = std::ecdsa_secp256k1::verify_signature(
@@ -442,7 +442,7 @@ pub contract Wormhole {
     // ============================================================================
     // GUARDIAN MANAGEMENT
     // ============================================================================
-    
+
     // Individual guardian setters
     #[external("public")]
     fn set_guardian1(guardian: Guardian, index: u32) {
@@ -568,29 +568,28 @@ pub contract Wormhole {
     // ============================================================================
     // ACCESS CONTROL
     // ============================================================================
-    
+
     #[external("public")]
     #[only_self]
-    fn _assert_is_owner() {
-        assert(
-            self.storage.owner.read().eq(self.msg_sender().unwrap()),
-            "caller is not owner",
-        );
+    fn _assert_is_owner(caller: AztecAddress) {
+        assert(self.storage.owner.read().eq(caller), "caller is not owner");
     }
 
     // ============================================================================
     // ADDRESS MANAGEMENT FUNCTIONS
     // ============================================================================
-    
+
     #[external("public")]
     fn set_receiver_address(new_receiver_address: AztecAddress) {
-        self._assert_is_owner();
+        let caller = self.msg_sender().unwrap();
+        assert(self.storage.owner.read().eq(caller), "caller is not owner");
         self.storage.receiver_address.schedule_value_change(new_receiver_address);
     }
 
     #[external("public")]
     fn set_token_address(new_token_address: AztecAddress) {
-        self._assert_is_owner();
+        let caller = self.msg_sender().unwrap();
+        assert(self.storage.owner.read().eq(caller), "caller is not owner");
         self.storage.token_address.schedule_value_change(new_token_address);
     }
 
@@ -621,7 +620,8 @@ pub contract Wormhole {
 
     #[external("public")]
     fn transfer_ownership(new_owner: AztecAddress) {
-        self._assert_is_owner();
+        let caller = self.msg_sender().unwrap();
+        assert(self.storage.owner.read().eq(caller), "caller is not owner");
         self.storage.owner.write(new_owner);
     }
 
@@ -629,10 +629,7 @@ pub contract Wormhole {
 
 mod tests {
     use crate::{structs::Signature, Wormhole};
-    use dep::aztec::protocol_types::{
-        address::AztecAddress,
-        traits::FromField,
-    };
+    use dep::aztec::protocol_types::{address::AztecAddress, traits::FromField};
     use dep::aztec::test::helpers::test_environment::TestEnvironment;
 
     #[test]
@@ -672,12 +669,10 @@ mod tests {
             0x037e5d19d6d27e2fb7c947cfe7c36459e27d35e46dd59f5f47373a64ff491d2c,
         );
 
-        let contract_address = env
-            .deploy("Wormhole")
-            .with_public_initializer(
-                dummy_owner,
-                Wormhole::interface().init(56, 56, dummy_owner, receiver_address, token_address),
-            );
+        let contract_address = env.deploy("Wormhole").with_public_initializer(
+            dummy_owner,
+            Wormhole::interface().init(56, 56, dummy_owner, receiver_address, token_address),
+        );
 
         let mut vaa_bytes: [u8; 2000] = [0; 2000];
         let actual_length = 221;
