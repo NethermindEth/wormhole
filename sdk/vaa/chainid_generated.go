@@ -160,8 +160,6 @@ func (c ChainID) String() string {
 		return "monadtestnet"
 	case ChainIDHyperCore:
 		return "hypercore"
-	case ChainIDAztec:
-		return "aztec"
 	default:
 		return fmt.Sprintf("unknown chain ID: %d", c)
 	}
@@ -320,8 +318,6 @@ func ChainIDFromString(s string) (ChainID, error) {
 		return ChainIDMonadTestnet, nil
 	case "hypercore":
 		return ChainIDHyperCore, nil
-	case "aztec":
-		return ChainIDAztec, nil
 	default:
 		return ChainIDUnset, fmt.Errorf("unknown chain ID: %s", s)
 	}
@@ -404,6 +400,5 @@ func GetAllNetworkIDs() []ChainID {
 		ChainIDPolygonSepolia,
 		ChainIDMonadTestnet,
 		ChainIDHyperCore,
-		ChainIDAztec,
 	}
 }
