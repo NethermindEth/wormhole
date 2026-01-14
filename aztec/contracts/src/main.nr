@@ -1,4 +1,4 @@
-use dep::aztec::macros::aztec;
+use aztec::macros::aztec;
 mod structs;
 
 /*
@@ -20,12 +20,11 @@ pub contract Wormhole {
     use crate::structs::{Guardian, Provider, Signature, WormholeStorage};
     use dep::keccak256::keccak256;
 
-    use dep::aztec::{
-        macros::{functions::{initializer, internal, external}, storage::storage},
-        state_vars::{map::Map, public_mutable::PublicMutable, delayed_public_mutable::DelayedPublicMutable},
-        protocol_types::{
-            address::AztecAddress,
-            traits::ToField,
+    use aztec::{
+        macros::{functions::{external, initializer, only_self}, storage::storage},
+        protocol_types::{address::AztecAddress, traits::ToField},
+        state_vars::{
+            delayed_public_mutable::DelayedPublicMutable, map::Map, public_mutable::PublicMutable,
         },
     };
 
@@ -78,11 +77,11 @@ pub contract Wormhole {
         token_address: AztecAddress,
     ) {
         let provider: Provider = Provider { chain_id, evm_chain_id };
-        storage.state.write(WormholeStorage::init(provider));
-        storage.owner.write(owner);
-        storage.receiver_address.schedule_value_change(receiver_address);
-        storage.token_address.schedule_value_change(token_address);
-        storage.current_guardian_set_index.at(0).write(18_446_744_073_709_551_615);
+        self.storage.state.write(WormholeStorage::init(provider));
+        self.storage.owner.write(owner);
+        self.storage.receiver_address.schedule_value_change(receiver_address);
+        self.storage.token_address.schedule_value_change(token_address);
+        self.storage.current_guardian_set_index.at(0).write(18_446_744_073_709_551_615);
     }
 
     // ============================================================================
@@ -98,28 +97,28 @@ pub contract Wormhole {
         from: AztecAddress,
         token_nonce: Field,
     ) -> u64 {
-        assert(storage.state.read().message_fee <= message_fee, "insufficient fee");
+        assert(self.storage.state.read().message_fee <= message_fee, "insufficient fee");
 
-        let receiver_address = storage.receiver_address.get_current_value();
-        let token_address = storage.token_address.get_current_value();
+        let receiver_address = self.storage.receiver_address.get_current_value();
+        let token_address = self.storage.token_address.get_current_value();
 
         // Only transfer tokens if fee is greater than 0
         if message_fee > 0 {
-            let _ = Token::at(token_address)
+            Token::at(token_address)
                 .transfer_in_public(from, receiver_address, message_fee, token_nonce)
-                .call(&mut context);
+                .call(self.context);
         }
 
-        let sender = context.msg_sender().unwrap();
-        let sequence = storage.sequences.at(sender).read();
-        storage.sequences.at(sender).write(sequence + 1);
+        let sender = self.msg_sender().unwrap();
+        let sequence = self.storage.sequences.at(sender).read();
+        self.storage.sequences.at(sender).write(sequence + 1);
 
         let msg: [Field; 13] = [
             sender.to_field(),
             sequence as Field,
             nonce as Field,
             consistency as Field,
-            context.timestamp() as Field,
+            self.context.timestamp() as Field,
             Field::from_le_bytes(payloads[0]),
             Field::from_le_bytes(payloads[1]),
             Field::from_le_bytes(payloads[2]),
@@ -130,7 +129,7 @@ pub contract Wormhole {
             Field::from_le_bytes(payloads[7]),
         ];
 
-        context.emit_public_log(msg);
+        self.context.emit_public_log(msg);
         sequence
     }
 
@@ -145,19 +144,17 @@ pub contract Wormhole {
     ) {
         assert(0 <= message_fee, "insufficient fee");
 
-        let receiver_address = storage.receiver_address.get_current_value();
-        let token_address = storage.token_address.get_current_value();
+        let receiver_address = self.storage.receiver_address.get_current_value();
+        let token_address = self.storage.token_address.get_current_value();
 
         // Only transfer tokens if fee is greater than 0
         if message_fee > 0 {
-            let _ = Token::at(token_address)
+            Token::at(token_address)
                 .transfer_in_private(from, receiver_address, message_fee, token_nonce)
-                .call(&mut context);
+                .call(self.context);
         }
 
-        Wormhole::at(context.this_address())._publish_message(nonce, payloads, consistency).enqueue(
-            &mut context,
-        );
+        self.enqueue_self._publish_message(nonce, payloads, consistency);
     }
 
     #[external("private")]
@@ -179,17 +176,16 @@ pub contract Wormhole {
     ) {
         assert(0 <= message_fee, "insufficient fee");
 
-
         // Only transfer tokens if fee is greater than 0
         if message_fee > 0 {
-            let receiver_address = storage.receiver_address.get_current_value();
-            let token_address = storage.token_address.get_current_value();
-            let _ = Token::at(token_address)
+            let receiver_address = self.storage.receiver_address.get_current_value();
+            let token_address = self.storage.token_address.get_current_value();
+            Token::at(token_address)
                 .transfer_in_private(from, receiver_address, message_fee, token_nonce)
-                .call(&mut context);
+                .call(self.context);
         }
 
-        Wormhole::at(context.this_address())._publish_message_flat(
+        self.enqueue_self._publish_message_flat(
             nonce,
             payload_1,
             payload_2,
@@ -199,14 +195,12 @@ pub contract Wormhole {
             payload_6,
             payload_7,
             payload_8,
-            consistency
-        ).enqueue(
-            &mut context,
+            consistency,
         );
     }
 
     #[external("public")]
-    #[internal]
+    #[only_self]
     fn _publish_message_flat(
         nonce: u64,
         payload_1: [u8; 31],
@@ -217,18 +211,18 @@ pub contract Wormhole {
         payload_6: [u8; 31],
         payload_7: [u8; 31],
         payload_8: [u8; 31],
-        consistency: u8
+        consistency: u8,
     ) -> u64 {
-        let sender = context.msg_sender().unwrap();
-        let sequence = storage.sequences.at(sender).read();
-        storage.sequences.at(sender).write(sequence + 1);
+        let sender = self.msg_sender().unwrap();
+        let sequence = self.storage.sequences.at(sender).read();
+        self.storage.sequences.at(sender).write(sequence + 1);
 
         let msg: [Field; 13] = [
             sender.to_field(),
             sequence as Field,
             nonce as Field,
             consistency as Field,
-            context.timestamp() as Field,
+            self.context.timestamp() as Field,
             Field::from_le_bytes(payload_1),
             Field::from_le_bytes(payload_2),
             Field::from_le_bytes(payload_3),
@@ -239,23 +233,23 @@ pub contract Wormhole {
             Field::from_le_bytes(payload_8),
         ];
 
-        context.emit_public_log(msg);
+        self.context.emit_public_log(msg);
         sequence
     }
 
     #[external("public")]
-    #[internal]
+    #[only_self]
     fn _publish_message(nonce: u64, payloads: [[u8; 31]; 8], consistency: u8) -> u64 {
-        let sender = context.msg_sender().unwrap();
-        let sequence = storage.sequences.at(sender).read();
-        storage.sequences.at(sender).write(sequence + 1);
+        let sender = self.msg_sender().unwrap();
+        let sequence = self.storage.sequences.at(sender).read();
+        self.storage.sequences.at(sender).write(sequence + 1);
 
         let msg: [Field; 13] = [
             sender.to_field(),
             sequence as Field,
             nonce as Field,
             consistency as Field,
-            context.timestamp() as Field,
+            self.context.timestamp() as Field,
             Field::from_le_bytes(payloads[0]),
             Field::from_le_bytes(payloads[1]),
             Field::from_le_bytes(payloads[2]),
@@ -266,15 +260,16 @@ pub contract Wormhole {
             Field::from_le_bytes(payloads[7]),
         ];
 
-        context.emit_public_log(msg);
+        self.context.emit_public_log(msg);
         sequence
     }
 
     // ============================================================================
     // CORE FUNCTIONALITY - VAA VERIFICATION
     // ============================================================================
-    
-    #[external("utility")]
+
+    // Internal helper function for parsing VAA bytes
+    #[contract_library_method]
     unconstrained fn parse_vaa_unconstrained(
         bytes: [u8; 2000],
         actual_length: u32,
@@ -316,7 +311,8 @@ pub contract Wormhole {
         (guardian_set_index, signatures_len, signatures, body_bytes, body_length)
     }
 
-    #[external("utility")]
+    // Internal helper function for computing VAA hash
+    #[contract_library_method]
     unconstrained fn compute_vaa_hash_unconstrained(
         body_bytes: [u8; 1860],
         body_length: u32,
@@ -396,7 +392,7 @@ pub contract Wormhole {
                 signature_bytes_array[i as u32] = signature_bytes;
             }
         }
-        
+
         (pub_keys_x, pub_keys_y, signature_bytes_array, hash, signatures_len)
     }
 
@@ -413,7 +409,7 @@ pub contract Wormhole {
 
         // TODO: Uncomment this when ECDSA verification in loop is implemented.
         // See issue: https://github.com/noir-lang/noir/pull/8993
-        
+
         // for i in 0..13 {
         //     if i < signatures_len {
         //        let is_valid = std::ecdsa_secp256k1::verify_signature(
@@ -446,101 +442,101 @@ pub contract Wormhole {
     // ============================================================================
     // GUARDIAN MANAGEMENT
     // ============================================================================
-    
+
     // Individual guardian setters
     #[external("public")]
     fn set_guardian1(guardian: Guardian, index: u32) {
-        storage.guardian_1.at(index).write(guardian);
+        self.storage.guardian_1.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian2(guardian: Guardian, index: u32) {
-        storage.guardian_2.at(index).write(guardian);
+        self.storage.guardian_2.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian3(guardian: Guardian, index: u32) {
-        storage.guardian_3.at(index).write(guardian);
+        self.storage.guardian_3.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian4(guardian: Guardian, index: u32) {
-        storage.guardian_4.at(index).write(guardian);
+        self.storage.guardian_4.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian5(guardian: Guardian, index: u32) {
-        storage.guardian_5.at(index).write(guardian);
+        self.storage.guardian_5.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian6(guardian: Guardian, index: u32) {
-        storage.guardian_6.at(index).write(guardian);
+        self.storage.guardian_6.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian7(guardian: Guardian, index: u32) {
-        storage.guardian_7.at(index).write(guardian);
+        self.storage.guardian_7.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian8(guardian: Guardian, index: u32) {
-        storage.guardian_8.at(index).write(guardian);
+        self.storage.guardian_8.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian9(guardian: Guardian, index: u32) {
-        storage.guardian_9.at(index).write(guardian);
+        self.storage.guardian_9.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian10(guardian: Guardian, index: u32) {
-        storage.guardian_10.at(index).write(guardian);
+        self.storage.guardian_10.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian11(guardian: Guardian, index: u32) {
-        storage.guardian_11.at(index).write(guardian);
+        self.storage.guardian_11.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian12(guardian: Guardian, index: u32) {
-        storage.guardian_12.at(index).write(guardian);
+        self.storage.guardian_12.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian13(guardian: Guardian, index: u32) {
-        storage.guardian_13.at(index).write(guardian);
+        self.storage.guardian_13.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian14(guardian: Guardian, index: u32) {
-        storage.guardian_14.at(index).write(guardian);
+        self.storage.guardian_14.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian15(guardian: Guardian, index: u32) {
-        storage.guardian_15.at(index).write(guardian);
+        self.storage.guardian_15.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian16(guardian: Guardian, index: u32) {
-        storage.guardian_16.at(index).write(guardian);
+        self.storage.guardian_16.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian17(guardian: Guardian, index: u32) {
-        storage.guardian_17.at(index).write(guardian);
+        self.storage.guardian_17.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian18(guardian: Guardian, index: u32) {
-        storage.guardian_18.at(index).write(guardian);
+        self.storage.guardian_18.at(index).write(guardian);
     }
 
     #[external("public")]
     fn set_guardian19(guardian: Guardian, index: u32) {
-        storage.guardian_19.at(index).write(guardian);
+        self.storage.guardian_19.at(index).write(guardian);
     }
 
     // ============================================================================
@@ -549,91 +545,91 @@ pub contract Wormhole {
 
     #[external("public")]
     fn expire_guardian_set(index: u32) {
-        storage.current_guardian_set_index.at(index).write(context.timestamp() + 86400);
+        self.storage.current_guardian_set_index.at(index).write(self.context.timestamp() + 86400);
     }
 
     #[external("public")]
     fn guardian_set_expired(index: u32) -> bool {
-        let timestamp = storage.current_guardian_set_index.at(index).read();
-        context.timestamp() > timestamp
+        let timestamp = self.storage.current_guardian_set_index.at(index).read();
+        self.context.timestamp() > timestamp
     }
 
     #[external("public")]
     fn set_provider(provider: Provider) {
-        let updated_storage = WormholeStorage::set_provider(storage.state.read(), provider);
-        storage.state.write(updated_storage);
+        let updated_storage = WormholeStorage::set_provider(self.storage.state.read(), provider);
+        self.storage.state.write(updated_storage);
     }
 
     #[external("public")]
     fn get_provider() -> Provider {
-        WormholeStorage::get_provider(storage.state.read())
+        WormholeStorage::get_provider(self.storage.state.read())
     }
 
     // ============================================================================
     // ACCESS CONTROL
     // ============================================================================
-    
+
     #[external("public")]
-    #[internal]
-    fn _assert_is_owner() {
-        assert(storage.owner.read().eq(context.msg_sender().unwrap()), "caller is not owner");
+    #[only_self]
+    fn _assert_is_owner(caller: AztecAddress) {
+        assert(self.storage.owner.read().eq(caller), "caller is not owner");
     }
 
     // ============================================================================
     // ADDRESS MANAGEMENT FUNCTIONS
     // ============================================================================
-    
+
     #[external("public")]
     fn set_receiver_address(new_receiver_address: AztecAddress) {
-        _assert_is_owner();
-        storage.receiver_address.schedule_value_change(new_receiver_address);
+        let caller = self.msg_sender().unwrap();
+        assert(self.storage.owner.read().eq(caller), "caller is not owner");
+        self.storage.receiver_address.schedule_value_change(new_receiver_address);
     }
 
     #[external("public")]
     fn set_token_address(new_token_address: AztecAddress) {
-        _assert_is_owner();
-        storage.token_address.schedule_value_change(new_token_address);
+        let caller = self.msg_sender().unwrap();
+        assert(self.storage.owner.read().eq(caller), "caller is not owner");
+        self.storage.token_address.schedule_value_change(new_token_address);
     }
 
     #[external("public")]
     fn get_receiver_address() -> AztecAddress {
-        storage.receiver_address.get_current_value()
+        self.storage.receiver_address.get_current_value()
     }
 
     #[external("public")]
     fn get_token_address() -> AztecAddress {
-        storage.token_address.get_current_value()
+        self.storage.token_address.get_current_value()
     }
 
     #[external("public")]
     fn get_scheduled_receiver_address() -> (AztecAddress, u64) {
-        storage.receiver_address.get_scheduled_value()
+        self.storage.receiver_address.get_scheduled_value()
     }
 
     #[external("public")]
     fn get_scheduled_token_address() -> (AztecAddress, u64) {
-        storage.token_address.get_scheduled_value()
+        self.storage.token_address.get_scheduled_value()
     }
 
     #[external("public")]
     fn get_owner() -> AztecAddress {
-        storage.owner.read()
+        self.storage.owner.read()
     }
 
     #[external("public")]
     fn transfer_ownership(new_owner: AztecAddress) {
-        _assert_is_owner();
-        storage.owner.write(new_owner);
+        let caller = self.msg_sender().unwrap();
+        assert(self.storage.owner.read().eq(caller), "caller is not owner");
+        self.storage.owner.write(new_owner);
     }
 
 }
 
 mod tests {
     use crate::{structs::Signature, Wormhole};
-    use dep::aztec::protocol_types::{
-        address::AztecAddress,
-        traits::FromField,
-    };
+    use dep::aztec::protocol_types::{address::AztecAddress, traits::FromField};
     use dep::aztec::test::helpers::test_environment::TestEnvironment;
 
     #[test]
@@ -673,12 +669,10 @@ mod tests {
             0x037e5d19d6d27e2fb7c947cfe7c36459e27d35e46dd59f5f47373a64ff491d2c,
         );
 
-        let contract_address = env
-            .deploy("Wormhole")
-            .with_public_initializer(
-                dummy_owner,
-                Wormhole::interface().init(56, 56, dummy_owner, receiver_address, token_address),
-            );
+        let contract_address = env.deploy("Wormhole").with_public_initializer(
+            dummy_owner,
+            Wormhole::interface().init(56, 56, dummy_owner, receiver_address, token_address),
+        );
 
         let mut vaa_bytes: [u8; 2000] = [0; 2000];
         let actual_length = 221;

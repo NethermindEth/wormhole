@@ -37,9 +37,9 @@ If you prefer to deploy manually or need more control over the process, follow t
 
 ```bash
 # Devnet configuration
-export VERSION=3.0.0-devnet.5
-export NODE_URL=https://devnet.aztec-labs.com/
-aztec-up 3.0.0-devnet.5 # pull the devnet image
+export VERSION=3.0.0-devnet.20251212
+export NODE_URL=https://next.devnet.aztec-labs.com/
+aztec-up 3.0.0-devnet.20251212 # pull the devnet image
 export SPONSORED_FPC_ADDRESS=$(aztec get-canonical-sponsored-fpc-address | awk '{print $NF}')
 
 # Owner private key (32-byte)
@@ -200,20 +200,21 @@ aztec-wallet send mint_to_public \
 
 ### 8. Compile the Wormhole Contract
 
-**Important**: The Wormhole contract must be compiled before deployment. If you've made any changes to the contract source code, compile it first:
+**Important**: The Wormhole contract must be compiled before deployment. If you've made any changes to the contract source code, compile it first. The Aztec CLI now replaces `aztec-nargo`; use `aztec` commands below.
 
-**Note**: The contract now uses `DelayedPublicMutable` storage for addresses, eliminating the need for hardcoded addresses in private functions. The addresses are now properly managed through the contract's storage system with appropriate access controls and delays.
+**Note**: The contract uses `DelayedPublicMutable` storage for addresses, eliminating the need for hardcoded addresses in private functions. The addresses are managed through storage with access controls and delays.
 
 **Important**: The contract includes owner-based access control:
 - Only the contract owner can change addresses
-- Address changes have a 87,000 second (~1 day) delay
+- Address changes have an 87,000 second (~1 day) delay
 - Ownership can be transferred by the current owner
 
 ```bash
-# Compile the contract and generate artifacts
-aztec-nargo compile
-aztec-postprocess-contract
-aztec codegen ./src -o src/artifacts
+# Compile contracts and generate artifacts
+aztec compile
+
+# Run tests (optional)
+aztec test
 ```
 
 ### 9. Deploy Wormhole Contract
