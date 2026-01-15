@@ -41,8 +41,8 @@ You have two options for deployment:
 
 ### Option A: Automated Deployment (Recommended)
 ```bash
-cd contracts
-./deploy.sh
+cd aztec
+./scripts/deploy.sh
 ```
 The deployment script will:
 - Set up wallets and accounts on Aztec testnet

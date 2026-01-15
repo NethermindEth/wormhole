@@ -48,6 +48,57 @@ func makeTestNotary(t *testing.T) *Notary {
 	}
 }
 
+// TestNotary_AlwaysApproveNonTransferVerifierEmitters tests that all messages are approve if the emitter chain does not have a transfer verifier.
+// This test can be removed if the Notary is extended to support other chains.
+func TestNotary_AlwaysApproveNonTransferVerifierEmitters(t *testing.T) {
+	// NOTE: Solana does not have a transfer verifier implementation
+	tests := map[string]struct {
+		verificationState common.VerificationState
+		emitterChain      vaa.ChainID
+		verdict           Verdict
+	}{
+		"approve non-transfer verifier when Rejected": {
+			common.Rejected,
+			vaa.ChainIDSolana,
+			Approve,
+		},
+		"approve non-transfer verifier when Anomalous": {
+			common.Anomalous,
+			vaa.ChainIDSolana,
+			Approve,
+		},
+		"delay non-Ethereum messages for chain with transfer verifier when Rejected": {
+			common.Rejected,
+			vaa.ChainIDSepolia,
+			Delay,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			n := makeTestNotary(t)
+			msg := makeUniqueMessagePublication(t)
+
+			// Set the emitter address to the known token bridge address for the environment.
+			msg.EmitterChain = test.emitterChain
+
+			err := msg.SetVerificationState(test.verificationState)
+			require.NoError(t, err)
+
+			require.True(t, vaa.IsTransfer(msg.Payload))
+
+			verdict, err := n.ProcessMsg(msg)
+			require.NoError(t, err)
+			require.Equal(
+				t,
+				test.verdict,
+				verdict,
+				fmt.Sprintf("verificationState=%s verdict=%s", msg.VerificationState().String(), verdict.String()),
+			)
+		})
+	}
+}
+
 func TestNotary_ProcessMessageCorrectVerdict(t *testing.T) {
 
 	// NOTE: This test should be exhaustive over VerificationState variants.
@@ -67,9 +118,9 @@ func TestNotary_ProcessMessageCorrectVerdict(t *testing.T) {
 			common.Valid,
 			Approve,
 		},
-		"approve could not verify": {
+		"delay could not verify": {
 			common.CouldNotVerify,
-			Approve,
+			Delay,
 		},
 		// Blackhole verdict is not being used for Rejected messages in the initial implementation
 		"delay rejected": {
@@ -129,9 +180,12 @@ func TestNotary_ProcessMsgUpdatesCollections(t *testing.T) {
 			common.NotApplicable,
 			expectedSizes{},
 		},
-		"CouldNotVerify has no effect": {
+		"CouldNotVerify gets delayed": {
 			common.CouldNotVerify,
-			expectedSizes{},
+			expectedSizes{
+				delayed:    1,
+				blackholed: 0,
+			},
 		},
 		"Anomalous gets delayed": {
 			common.Anomalous,
@@ -485,7 +539,7 @@ func makeUniqueMessagePublication(t *testing.T) *common.MessagePublication {
 	require.NoError(t, err)
 
 	// Required as the Notary checks the emitter address.
-	tokenBridge := sdk.KnownTokenbridgeEmitters[vaa.ChainIDEthereum]
+	tokenBridge := sdk.KnownDevnetTokenbridgeEmitters[vaa.ChainIDEthereum]
 	tokenBridgeAddress := vaa.Address(tokenBridge)
 	require.NoError(t, err)
 

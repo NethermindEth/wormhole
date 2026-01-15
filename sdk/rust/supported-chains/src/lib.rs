@@ -5,7 +5,8 @@ use std::{fmt, str::FromStr};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+
 pub enum Chain {
     /// In the wormhole wire format, 0 indicates that a message is for any destination chain, it is
     /// represented here as `Any`.

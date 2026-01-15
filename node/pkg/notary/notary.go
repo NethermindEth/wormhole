@@ -38,6 +38,7 @@ import (
 
 	"github.com/certusone/wormhole/node/pkg/common"
 	"github.com/certusone/wormhole/node/pkg/db"
+	"github.com/certusone/wormhole/node/pkg/txverifier"
 	"github.com/wormhole-foundation/wormhole/sdk"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 
@@ -82,6 +83,9 @@ const (
 	DefaultDelay = time.Hour * 24 * 4
 	MaxDelayDays = 30
 	MaxDelay     = time.Hour * 24 * MaxDelayDays
+
+	// The ticker interval for the notary's periodic metrics update.
+	metricsUpdateInterval = time.Second * 30
 )
 
 var (
@@ -138,6 +142,11 @@ func NewNotary(
 }
 
 func (n *Notary) Run() error {
+	// Initialize and register Prometheus metrics when notary starts.
+	// This ensures metrics are only registered when the notary is actually enabled.
+	// Safe to call multiple times - will only initialize once.
+	initMetrics(n.logger)
+
 	if n.env != common.GoTest {
 		n.logger.Info("loading notary data from database")
 		if err := n.loadFromDB(n.logger); err != nil {
@@ -147,37 +156,98 @@ func (n *Notary) Run() error {
 
 	n.logger.Info("notary ready")
 
+	// Spawn a goroutine to periodically update prometheus gauge metrics
+	go n.updateMetrics()
+
 	return nil
+}
+
+// updateMetrics runs periodically to update gauge metrics for queue sizes
+func (n *Notary) updateMetrics() {
+	ticker := time.NewTicker(metricsUpdateInterval)
+	defer ticker.Stop()
+
+	// Update metrics immediately on start
+	n.updateGauges()
+
+	for {
+		select {
+		case <-n.ctx.Done():
+			return
+		case <-ticker.C:
+			n.updateGauges()
+		}
+	}
+}
+
+// updateGauges updates the prometheus gauge metrics
+func (n *Notary) updateGauges() {
+
+	// Only update gauges if the notary is ready.
+	if n.blackholed == nil || n.delayed == nil {
+		n.logger.Info("Notary is not ready yet, skipping gauges update")
+		return
+	}
+
+	// Safety check: ensure metrics are initialized (should always be true after Run() is called)
+	if notaryDelayedMessagesGauge == nil || notaryBlackholedMessagesGauge == nil {
+		n.logger.Warn("Notary metrics not initialized, skipping gauges update")
+		return
+	}
+
+	n.mutex.RLock()
+	defer n.mutex.RUnlock()
+
+	notaryDelayedMessagesGauge.Set(float64(n.delayed.Len()))
+	notaryBlackholedMessagesGauge.Set(float64(n.blackholed.Len()))
 }
 
 func (n *Notary) ProcessMsg(msg *common.MessagePublication) (v Verdict, err error) {
 
 	n.logger.Debug("notary: processing message", msg.ZapFields()...)
 
-	// NOTE: Only token transfers originated on Ethereum are currently considered.
 	// For the initial implementation, the Notary only rules on messages based
 	// on the Transfer Verifier. However, there is no technical barrier to
 	// supporting other message types.
-	if msg.EmitterChain != vaa.ChainIDEthereum {
-		n.logger.Debug("notary: automatically approving message publication because it is not from Ethereum", msg.ZapFields()...)
+	if !txverifier.IsSupported(msg.EmitterChain) {
+		n.logger.Debug("notary: automatically approving message: sent from a chain without a transfer verifier implementation", msg.ZapFields()...)
 		return Approve, nil
 	}
 
 	if !vaa.IsTransfer(msg.Payload) {
-		n.logger.Debug("notary: automatically approving message publication because it is not a token transfer", msg.ZapFields()...)
+		n.logger.Debug("notary: automatically approving message: it is not a wrapped token transfer", msg.ZapFields()...)
 		return Approve, nil
 	}
 
-	if tokenBridge, ok := sdk.KnownTokenbridgeEmitters[msg.EmitterChain]; !ok {
-		// Return Unknown if the token bridge is not registered in the SDK.
-		n.logger.Error("notary: unknown token bridge emitter", msg.ZapFields()...)
-		return Unknown, errors.New("unknown token bridge emitter")
-	} else {
-		// Approve if the token transfer is not from the token bridge.
-		// For now, the notary only rules on token transfers from the token bridge.
-		if !bytes.Equal(msg.EmitterAddress.Bytes(), tokenBridge) {
-			n.logger.Debug("notary: automatically approving message publication because it is not from the token bridge", msg.ZapFields()...)
-			return Approve, nil
+	var tbEmitters = make(map[vaa.ChainID][]byte)
+	switch n.env {
+	case common.MainNet:
+		tbEmitters = sdk.KnownTokenbridgeEmitters
+	case common.TestNet:
+		tbEmitters = sdk.KnownTestnetTokenbridgeEmitters
+	case common.UnsafeDevNet:
+		tbEmitters = sdk.KnownDevnetTokenbridgeEmitters
+	case common.AccountantMock, common.GoTest:
+	default:
+		n.logger.Debug("skipping token bridge emitter check because environment is not mainnet or testnet")
+	}
+
+	// Perform emitter checks when outside of unit tests or mock environments
+	if n.env == common.MainNet || n.env == common.TestNet || n.env == common.UnsafeDevNet {
+		if tokenBridge, ok := tbEmitters[msg.EmitterChain]; !ok {
+			// Return Unknown if the token bridge is not registered in the SDK.
+			n.logger.Error("notary: unknown token bridge emitter", msg.ZapFields()...)
+			if notaryErrors != nil {
+				notaryErrors.WithLabelValues("unknown_token_bridge").Inc()
+			}
+			return Unknown, errors.New("unknown token bridge emitter")
+		} else {
+			// Approve if the token transfer is not from the token bridge.
+			// For now, the notary only rules on token transfers from the token bridge.
+			if !bytes.Equal(msg.EmitterAddress.Bytes(), tokenBridge) {
+				n.logger.Debug("notary: automatically approving message publication because it is not from the token bridge", msg.ZapFields()...)
+				return Approve, nil
+			}
 		}
 	}
 
@@ -195,12 +265,14 @@ func (n *Notary) ProcessMsg(msg *common.MessagePublication) (v Verdict, err erro
 	// Both Anomalous and Rejected messages are delayed. In the future, we could consider blackholing
 	// rejected messages, but for now, we are choosing the cautious approach of delaying VAA production
 	// rather than rejecting them permanently.
-	case common.Anomalous, common.Rejected:
+	// CouldNotVerify messages are also delayed. For the Transfer Verifier, this should only happen if the
+	// message publication coming from the Core Bridge is malformed.
+	case common.Anomalous, common.Rejected, common.CouldNotVerify:
 		err = n.delay(msg, DefaultDelay)
 		v = Delay
 	case common.Valid:
 		v = Approve
-	case common.CouldNotVerify, common.NotVerified, common.NotApplicable:
+	case common.NotVerified, common.NotApplicable:
 		// NOTE: All other statuses are simply approved for now. In the future, it may be
 		// desirable to log a warning if a [common.NotVerified] message is handled here, with
 		// the idea that messages handled by the Notary must already have a non-default
@@ -212,6 +284,12 @@ func (n *Notary) ProcessMsg(msg *common.MessagePublication) (v Verdict, err erro
 	n.logger.Debug("notary result",
 		msg.ZapFields(zap.String("verdict", v.String()))...,
 	)
+
+	// Track messages that receive non-Approve verdicts
+	if v != Approve && notaryTokenTransferNonApprove != nil {
+		notaryTokenTransferNonApprove.WithLabelValues(v.String()).Inc()
+	}
+
 	return
 }
 
@@ -278,6 +356,9 @@ func (n *Notary) ReleaseReadyMessages() []*common.MessagePublication {
 		zap.Int("delayedCount", n.delayed.Len()),
 	)
 
+	if notaryReleasedMessagesCounter != nil {
+		notaryReleasedMessagesCounter.Add(float64(len(readyMsgs)))
+	}
 	return readyMsgs
 }
 
@@ -584,7 +665,12 @@ func NewSet() *msgPubSet {
 	}
 }
 
+// Len returns the number of elements in the set. Returns 0 if the set is nil.
 func (s *msgPubSet) Len() int {
+	if s == nil {
+		return 0
+	}
+
 	return len(s.elements)
 }
 
