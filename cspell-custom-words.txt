@@ -244,3 +244,7 @@ xpla
 XFER
 XPLA
 Zellic
+soroban
+deallocation
+stroops
+contractimpl
