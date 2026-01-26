@@ -1,4 +1,4 @@
-//! Transfer fees governance action (action ID 4).
+//! Transfer fees governance action (`ACTION_TRANSFER_FEES`, value 4).
 //!
 //! Allows guardians to withdraw accumulated message fees from the contract.
 //! Validates that sufficient balance remains (≥1 XLM) to prevent Stellar
@@ -32,7 +32,10 @@ pub struct FeeTransferEvent {
 pub struct TransferFeesPayload {
     /// Module identifier (must be "Core").
     pub module: BytesN<32>,
-    /// Action ID (must be 4).
+    /// Governance action ID from the VAA header.
+    ///
+    /// Must equal `ACTION_TRANSFER_FEES` (4); any other value is rejected by
+    /// `validate_governance_header`.
     pub action: u8,
     /// Target chain (0 for all, 61 for Stellar).
     pub chain: u16,

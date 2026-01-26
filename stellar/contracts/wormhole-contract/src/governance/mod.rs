@@ -1,10 +1,14 @@
 //! Governance action processing for the Wormhole Core contract.
 //!
-//! Implements the four governance actions defined by Wormhole:
-//! - Contract upgrade (action 1)
-//! - Guardian set upgrade (action 2)
-//! - Set message fee (action 3)
-//! - Transfer fees (action 4)
+//! Implements the four governance actions defined by Wormhole.
+//!
+//! Action IDs are encoded in the VAA governance header `action` byte and
+//! validated by `validate_governance_header` in each action module.
+//! Mappings are:
+//! - Contract upgrade (`ACTION_CONTRACT_UPGRADE`, 1)
+//! - Guardian set upgrade (`ACTION_GUARDIAN_SET_UPGRADE`, 2)
+//! - Set message fee (`ACTION_SET_MESSAGE_FEE`, 3)
+//! - Transfer fees (`ACTION_TRANSFER_FEES`, 4)
 //!
 //! All actions require VAAs signed by a quorum of guardians and originating
 //! from the governance chain (Solana) and emitter address.

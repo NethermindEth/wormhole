@@ -1,4 +1,4 @@
-//! Set message fee governance action (action ID 3).
+//! Set message fee governance action (`ACTION_SET_MESSAGE_FEE`, value 3).
 //!
 //! Allows guardians to update the fee charged for posting cross-chain messages.
 //! The fee is denominated in stroops (10^-7 XLM).
@@ -26,7 +26,10 @@ pub struct MessageFeeSetEvent {
 pub struct SetMessageFeePayload {
     /// Module identifier (must be "Core").
     pub module: BytesN<32>,
-    /// Action ID (must be 3).
+    /// Governance action ID from the VAA header.
+    ///
+    /// Must equal `ACTION_SET_MESSAGE_FEE` (3); any other value is rejected by
+    /// `validate_governance_header`.
     pub action: u8,
     /// Target chain (0 for all, 61 for Stellar).
     pub chain: u16,

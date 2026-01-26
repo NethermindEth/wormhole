@@ -1,4 +1,4 @@
-//! Contract upgrade governance action (action ID 1).
+//! Contract upgrade governance action (`ACTION_CONTRACT_UPGRADE`, value 1).
 //!
 //! Allows guardians to upgrade the contract WASM by providing the hash of a
 //! new contract version. The contract is its own admin, so upgrades require
@@ -27,7 +27,10 @@ struct ContractUpgradeEvent {
 pub struct ContractUpgradePayload {
     /// Module identifier (must be "Core").
     pub module: BytesN<32>,
-    /// Action ID (must be 1).
+    /// Governance action ID from the VAA header.
+    ///
+    /// Must equal `ACTION_CONTRACT_UPGRADE` (1); any other value is rejected by
+    /// `validate_governance_header`.
     pub action: u8,
     /// Target chain (0 for all, 61 for Stellar).
     pub chain: u16,

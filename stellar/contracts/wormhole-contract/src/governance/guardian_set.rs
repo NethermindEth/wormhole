@@ -1,4 +1,4 @@
-//! Guardian set upgrade governance action (action ID 2).
+//! Guardian set upgrade governance action (`ACTION_GUARDIAN_SET_UPGRADE`, value 2).
 //!
 //! Manages guardian set storage and upgrades. Guardian sets are indexed
 //! sequentially starting from 0. When a new set is installed, the previous
@@ -34,7 +34,10 @@ struct GuardianSetUpgradeEvent {
 pub struct GuardianSetUpgradePayload {
     /// Module identifier (must be "Core").
     pub module: BytesN<32>,
-    /// Action ID (must be 2).
+    /// Governance action ID from the VAA header.
+    ///
+    /// Must equal `ACTION_GUARDIAN_SET_UPGRADE` (2); any other value is rejected by
+    /// `validate_governance_header`.
     pub action: u8,
     /// Target chain (0 for all, 61 for Stellar).
     pub chain: u16,
