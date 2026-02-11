@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stellar-mock
+  labels:
+    app: stellar-mock
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stellar-mock
+  template:
+    metadata:
+      labels:
+        app: stellar-mock
+    spec:
+      containers:
+        - name: mock
+          image: stellar-mock:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: CORE_CONTRACT_ID
+              value: "CABC...YOUR_CORE_ID"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stellar-mock
+  labels:
+    app: stellar-mock
+spec:
+  selector:
+    app: stellar-mock
+  ports:
+    - name: rpc
+      port: 8000
+      targetPort: 8000
