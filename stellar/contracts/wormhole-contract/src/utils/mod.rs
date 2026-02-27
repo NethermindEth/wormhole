@@ -3,8 +3,7 @@
 //! Provides helper functions for hashing, address format conversion between
 //! Stellar and Ethereum/Wormhole formats, and token address resolution.
 
-use soroban_sdk::{Address, Bytes, BytesN, Env, String};
-use stellar_strkey::{Strkey, ed25519::PublicKey as StrEd25519};
+use soroban_sdk::{Address, Bytes, BytesN, Env, String, address_payload::AddressPayload};
 use wormhole_soroban_client::NATIVE_TOKEN_ADDRESS;
 
 /// Computes keccak256 hash of data, returning a 32-byte array.
@@ -16,8 +15,7 @@ pub fn keccak256_hash(env: &Env, data: &Bytes) -> BytesN<32> {
 ///
 /// Used for decoding fee transfer recipients from governance VAA payloads.
 pub fn address_from_ed25519_pk_bytes(env: &Env, pk_bytes: &BytesN<32>) -> Address {
-    let str_pk = Strkey::PublicKeyEd25519(StrEd25519(pk_bytes.to_array()));
-    Address::from_string(&String::from_str(env, &str_pk.to_string()))
+    Address::from_payload(env, AddressPayload::AccountIdPublicKeyEd25519(pk_bytes.clone()))
 }
 
 /// Derives an Ethereum address from a recovered secp256k1 public key.
