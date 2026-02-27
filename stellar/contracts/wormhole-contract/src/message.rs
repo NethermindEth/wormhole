@@ -3,7 +3,7 @@
 //! Handles posting messages to be attested by Wormhole guardians, including
 //! fee collection, sequence number management, and event emission.
 
-use soroban_sdk::{Address, Bytes, BytesN, Env, contractevent, token};
+use soroban_sdk::{Address, Bytes, BytesN, Env, address_payload::AddressPayload, contractevent, token};
 use wormhole_soroban_client::{
     CHAIN_ID_STELLAR, ConsistencyLevel, PostedMessageData, STORAGE_TTL_EXTENSION,
     STORAGE_TTL_THRESHOLD, WormholeError,
@@ -12,7 +12,7 @@ use wormhole_soroban_client::{
 use crate::{
     governance,
     storage::StorageKey,
-    utils::{contract_address_to_bytes32, get_native_token_address, keccak256_hash},
+    utils::{get_native_token_address, keccak256_hash},
 };
 
 /// Emitted when a cross-chain message is posted successfully.
@@ -157,7 +157,10 @@ pub fn post_message_with_fee(
 
     let sequence = next_emitter_sequence(env, emitter);
 
-    let emitter_bytes = contract_address_to_bytes32(env, emitter)?;
+    let emitter_bytes = match emitter.to_payload() {
+        Some(AddressPayload::ContractIdHash(contract_id)) => contract_id,
+        _ => return Err(WormholeError::InvalidEmitterAddress),
+    };
 
     let message_data = PostedMessageData {
         timestamp: u32::try_from(env.ledger().timestamp()).unwrap_or(0),

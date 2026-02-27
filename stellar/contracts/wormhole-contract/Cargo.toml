@@ -9,7 +9,7 @@ crate-type = ["lib", "cdylib"]
 doctest = false
 
 [dependencies]
-soroban-sdk = { workspace = true, features = ["alloc"] }
+soroban-sdk = { workspace = true, features = ["alloc", "hazmat-address"] }
 stellar-strkey = { workspace = true }
 wormhole-soroban-client = { workspace = true }
 
