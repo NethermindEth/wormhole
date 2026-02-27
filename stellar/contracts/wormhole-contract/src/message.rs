@@ -12,20 +12,21 @@ use wormhole_soroban_client::{
 use crate::{
     governance,
     storage::StorageKey,
-    utils::{address_to_bytes32, get_native_token_address, keccak256_hash},
+    utils::{contract_address_to_bytes32, get_native_token_address, keccak256_hash},
 };
 
 /// Emitted when a cross-chain message is posted successfully.
 ///
-/// Guardians observe these events and produce VAAs attesting to the message contents.
-/// The event data matches the message body structure for easy verification.
+/// Guardians observe these events and produce VAAs attesting to the message
+/// contents. The event data matches the message body structure for easy
+/// verification.
 #[contractevent(topics = ["wormhole", "message_published"])]
 struct MessagePublishedEvent {
     /// Caller-provided nonce for deduplication.
     nonce: u32,
     /// Auto-assigned sequence number for this emitter.
     sequence: u64,
-    /// Keccak256 hash of the emitter's Stellar address.
+    /// 32-byte contract ID of the emitter contract.
     emitter_address: BytesN<32>,
     /// Application-specific message data.
     payload: Bytes,
@@ -156,7 +157,7 @@ pub fn post_message_with_fee(
 
     let sequence = next_emitter_sequence(env, emitter);
 
-    let emitter_bytes = address_to_bytes32(env, emitter);
+    let emitter_bytes = contract_address_to_bytes32(env, emitter)?;
 
     let message_data = PostedMessageData {
         timestamp: u32::try_from(env.ledger().timestamp()).unwrap_or(0),

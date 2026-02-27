@@ -3,9 +3,9 @@
 //! Provides helper functions for hashing, address format conversion between
 //! Stellar and Ethereum/Wormhole formats, and token address resolution.
 
-use soroban_sdk::{Address, Bytes, BytesN, Env, String};
+use soroban_sdk::{Address, Bytes, BytesN, Env, String, xdr::ScAddress};
 use stellar_strkey::{Strkey, ed25519::PublicKey as StrEd25519};
-use wormhole_soroban_client::NATIVE_TOKEN_ADDRESS;
+use wormhole_soroban_client::{NATIVE_TOKEN_ADDRESS, WormholeError};
 
 /// Computes keccak256 hash of data, returning a 32-byte array.
 pub fn keccak256_hash(env: &Env, data: &Bytes) -> BytesN<32> {
@@ -20,14 +20,18 @@ pub fn address_from_ed25519_pk_bytes(env: &Env, pk_bytes: &BytesN<32>) -> Addres
     Address::from_string(&String::from_str(env, &str_pk.to_string()))
 }
 
-/// Converts a Stellar address to its 32-byte Wormhole representation.
+/// Converts a contract `Address` to its 32-byte Wormhole representation.
 ///
-/// Computes `keccak256(strkey)` to produce a deterministic 32-byte identifier
-/// compatible with the Wormhole message format.
-pub fn address_to_bytes32(env: &Env, address: &Address) -> BytesN<32> {
-    let addr_string = address.to_string();
-    let addr_bytes_obj = addr_string.to_bytes();
-    keccak256_hash(env, &addr_bytes_obj)
+/// For Stellar contract emitters, this is the raw 32-byte contract ID.
+pub fn contract_address_to_bytes32(
+    env: &Env,
+    address: &Address,
+) -> Result<BytesN<32>, WormholeError> {
+    let sc_address: ScAddress = address.into();
+    match sc_address {
+        ScAddress::Contract(contract_id) => Ok(BytesN::from_array(env, &contract_id.0.0)),
+        _ => Err(WormholeError::InvalidEmitterAddress),
+    }
 }
 
 /// Derives an Ethereum address from a recovered secp256k1 public key.
