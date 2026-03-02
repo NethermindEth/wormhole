@@ -19,17 +19,19 @@ use wormhole_soroban_client::WormholeError;
 /// - Signature indices are strictly ascending (prevents reuse)
 /// - Each signature recovers to the expected guardian's Ethereum address
 ///
-/// Uses double keccak256 hashing as per Wormhole spec: `keccak256(keccak256(body))`.
+/// Uses double keccak256 hashing as per Wormhole spec:
+/// `keccak256(keccak256(body))`.
 pub fn verify_vaa_signatures(vaa: &VAA, env: &Env) -> Result<bool, WormholeError> {
     let body_bytes = vaa.serialize_body(env);
 
-    let guardian_set_info = governance::guardian_set::get_guardian_set(env, vaa.guardian_set_index)?;
+    let guardian_set_info =
+        governance::guardian_set::get_guardian_set(env, vaa.guardian_set_index)?;
 
-    if let Some(expiry) = governance::guardian_set::get_guardian_set_expiry(env, vaa.guardian_set_index) {
-        if env.ledger().timestamp() > expiry {
+    if let Some(expiry) =
+        governance::guardian_set::get_guardian_set_expiry(env, vaa.guardian_set_index)
+        && env.ledger().timestamp() > expiry {
             return Err(WormholeError::GuardianSetExpired);
         }
-    }
 
     verify_signatures_impl(vaa, env, &body_bytes, &guardian_set_info.keys)
 }
@@ -93,9 +95,10 @@ fn verify_signatures_impl(
 
     for signature in vaa.signatures.iter() {
         if let Some(last_idx) = last_guardian_index
-            && signature.guardian_index <= last_idx {
-                return Err(WormholeError::SignaturesNotAscending);
-            }
+            && signature.guardian_index <= last_idx
+        {
+            return Err(WormholeError::SignaturesNotAscending);
+        }
         last_guardian_index = Some(signature.guardian_index);
 
         if signature.guardian_index >= guardian_count {
@@ -157,7 +160,12 @@ mod tests {
         }
     }
 
-    fn sign_for_vaa(env: &Env, vaa: &VAA, sk_bytes: [u8; 32], guardian_index: u32) -> (Signature, BytesN<20>) {
+    fn sign_for_vaa(
+        env: &Env,
+        vaa: &VAA,
+        sk_bytes: [u8; 32],
+        guardian_index: u32,
+    ) -> (Signature, BytesN<20>) {
         let body_bytes = vaa.serialize_body(env);
         let body_hash_bytes: Bytes = crate::utils::keccak256_hash(env, &body_bytes).into();
         let double_hash = env.crypto().keccak256(&body_hash_bytes);
@@ -406,7 +414,6 @@ mod tests {
         let body_hash_bytes: Bytes = crate::utils::keccak256_hash(&env, &body_bytes).into();
         let double_hash = env.crypto().keccak256(&body_hash_bytes);
         let msg32: [u8; 32] = double_hash.to_array();
-
 
         let secp = secp256k1::Secp256k1::new();
 

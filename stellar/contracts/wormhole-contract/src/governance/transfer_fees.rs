@@ -20,7 +20,8 @@ use wormhole_soroban_client::{
 /// Event published when fees are transferred out.
 ///
 /// Topics: ["wormhole_core", "fee_transfer"]
-/// - "wormhole_core": Namespace for all core contract governance/lifecycle events
+/// - "wormhole_core": Namespace for all core contract governance/lifecycle
+///   events
 #[contractevent(topics = ["wormhole_core", "fee_transfer"])]
 pub struct FeeTransferEvent {
     pub amount: u64,
@@ -151,7 +152,8 @@ mod tests {
     use super::*;
     use crate::Wormhole;
     use soroban_sdk::{
-        Address, Bytes, BytesN, Env, IntoVal, Symbol, String, Val, contract, contractimpl, contracttype,
+        Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, contract, contractimpl,
+        contracttype,
         testutils::{Address as TestAddress, Events, Ledger},
     };
     use wormhole_soroban_client::{
@@ -221,8 +223,13 @@ mod tests {
     #[test]
     fn test_transfer_fees_payload_parses_amount_and_recipient() {
         let env = Env::default();
-        let payload =
-            build_payload(&env, MODULE_CORE, ACTION_TRANSFER_FEES, CHAIN_ID_STELLAR, 12345);
+        let payload = build_payload(
+            &env,
+            MODULE_CORE,
+            ACTION_TRANSFER_FEES,
+            CHAIN_ID_STELLAR,
+            12345,
+        );
         let parsed = TransferFeesPayload::try_from((&env, &payload)).unwrap();
 
         assert_eq!(parsed.action, ACTION_TRANSFER_FEES);

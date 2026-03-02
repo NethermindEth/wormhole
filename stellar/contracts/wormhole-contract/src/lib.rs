@@ -169,8 +169,8 @@ mod tests {
     use super::*;
     use soroban_sdk::{Bytes, BytesN, Env, vec};
     use wormhole_soroban_client::{
-        ACTION_GUARDIAN_SET_UPGRADE, ACTION_SET_MESSAGE_FEE, ACTION_TRANSFER_FEES, GOVERNANCE_EMITTER,
-        MODULE_CORE,
+        ACTION_GUARDIAN_SET_UPGRADE, ACTION_SET_MESSAGE_FEE, ACTION_TRANSFER_FEES,
+        GOVERNANCE_EMITTER, MODULE_CORE,
     };
 
     fn deploy_initialized(env: &Env) -> (Address, WormholeClient<'_>) {
@@ -248,7 +248,8 @@ mod tests {
     fn test_submit_set_message_fee_wrapper_invalid_governance_chain() {
         let env = Env::default();
         let (_contract_id, client) = deploy_initialized(&env);
-        let vaa = build_unsigned_governance_vaa(&env, 9, GOVERNANCE_EMITTER, ACTION_SET_MESSAGE_FEE);
+        let vaa =
+            build_unsigned_governance_vaa(&env, 9, GOVERNANCE_EMITTER, ACTION_SET_MESSAGE_FEE);
         let res = client.try_submit_set_message_fee(&vaa);
         assert_eq!(res, Err(Ok(WormholeError::InvalidGovernanceChain)));
     }
@@ -259,8 +260,12 @@ mod tests {
         let (_contract_id, client) = deploy_initialized(&env);
         let mut bad_emitter = GOVERNANCE_EMITTER;
         bad_emitter[31] = 7;
-        let vaa =
-            build_unsigned_governance_vaa(&env, GOVERNANCE_CHAIN_ID as u16, bad_emitter, ACTION_GUARDIAN_SET_UPGRADE);
+        let vaa = build_unsigned_governance_vaa(
+            &env,
+            GOVERNANCE_CHAIN_ID as u16,
+            bad_emitter,
+            ACTION_GUARDIAN_SET_UPGRADE,
+        );
         let res = client.try_submit_guardian_set_upgrade(&vaa);
         assert_eq!(res, Err(Ok(WormholeError::InvalidGovernanceEmitter)));
     }

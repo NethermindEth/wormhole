@@ -1,4 +1,5 @@
-//! Guardian set upgrade governance action (`ACTION_GUARDIAN_SET_UPGRADE`, value 2).
+//! Guardian set upgrade governance action (`ACTION_GUARDIAN_SET_UPGRADE`, value
+//! 2).
 //!
 //! Manages guardian set storage and upgrades. Guardian sets are indexed
 //! sequentially starting from 0. When a new set is installed, the previous
@@ -35,8 +36,8 @@ pub struct GuardianSetUpgradePayload {
     pub module: BytesN<32>,
     /// Governance action ID from the VAA header.
     ///
-    /// Must equal `ACTION_GUARDIAN_SET_UPGRADE` (2); any other value is rejected by
-    /// `validate_governance_header`.
+    /// Must equal `ACTION_GUARDIAN_SET_UPGRADE` (2); any other value is
+    /// rejected by `validate_governance_header`.
     pub action: u8,
     /// Target chain (0 for all, 61 for Stellar).
     pub chain: u16,
@@ -254,7 +255,10 @@ mod tests {
     fn serialize_vaa(env: &Env, vaa: &VAA) -> Bytes {
         let mut out = Bytes::new(env);
         out.push_back(vaa.version as u8);
-        out.append(&Bytes::from_slice(env, &vaa.guardian_set_index.to_be_bytes()));
+        out.append(&Bytes::from_slice(
+            env,
+            &vaa.guardian_set_index.to_be_bytes(),
+        ));
         out.push_back(vaa.signatures.len() as u8);
         for sig in vaa.signatures.iter() {
             out.push_back(sig.guardian_index as u8);
@@ -264,7 +268,10 @@ mod tests {
         }
         out.append(&Bytes::from_slice(env, &vaa.timestamp.to_be_bytes()));
         out.append(&Bytes::from_slice(env, &vaa.nonce.to_be_bytes()));
-        out.append(&Bytes::from_slice(env, &(vaa.emitter_chain as u16).to_be_bytes()));
+        out.append(&Bytes::from_slice(
+            env,
+            &(vaa.emitter_chain as u16).to_be_bytes(),
+        ));
         out.append(&Bytes::from_array(env, &vaa.emitter_address.to_array()));
         out.append(&Bytes::from_slice(env, &vaa.sequence.to_be_bytes()));
         out.push_back(vaa.consistency_level as u8);

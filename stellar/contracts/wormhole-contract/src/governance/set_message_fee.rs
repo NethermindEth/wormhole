@@ -146,7 +146,13 @@ mod tests {
     #[test]
     fn test_set_message_fee_payload_parses_u256_padded_fee() {
         let env = Env::default();
-        let payload = build_payload(&env, MODULE_CORE, ACTION_SET_MESSAGE_FEE, CHAIN_ID_STELLAR, 1234);
+        let payload = build_payload(
+            &env,
+            MODULE_CORE,
+            ACTION_SET_MESSAGE_FEE,
+            CHAIN_ID_STELLAR,
+            1234,
+        );
 
         let parsed = SetMessageFeePayload::try_from((&env, &payload)).unwrap();
         assert_eq!(parsed.action, ACTION_SET_MESSAGE_FEE);
@@ -172,7 +178,10 @@ mod tests {
             chain: CHAIN_ID_STELLAR,
             fee: 1,
         };
-        assert_eq!(bad_module.validate(), Err(WormholeError::InvalidGovernanceModule));
+        assert_eq!(
+            bad_module.validate(),
+            Err(WormholeError::InvalidGovernanceModule)
+        );
 
         let bad_action = SetMessageFeePayload {
             module: BytesN::<32>::from_array(&env, &MODULE_CORE),
@@ -180,7 +189,10 @@ mod tests {
             chain: CHAIN_ID_STELLAR,
             fee: 1,
         };
-        assert_eq!(bad_action.validate(), Err(WormholeError::InvalidGovernanceAction));
+        assert_eq!(
+            bad_action.validate(),
+            Err(WormholeError::InvalidGovernanceAction)
+        );
 
         let bad_chain = SetMessageFeePayload {
             module: BytesN::<32>::from_array(&env, &MODULE_CORE),
@@ -188,7 +200,10 @@ mod tests {
             chain: 2,
             fee: 1,
         };
-        assert_eq!(bad_chain.validate(), Err(WormholeError::InvalidGovernanceChain));
+        assert_eq!(
+            bad_chain.validate(),
+            Err(WormholeError::InvalidGovernanceChain)
+        );
     }
 
     #[test]

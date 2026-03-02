@@ -10,7 +10,7 @@ use crate::governance::action::{
 use core::convert::TryFrom;
 use soroban_sdk::{Bytes, BytesN, Env, contractevent};
 use wormhole_soroban_client::{
-    ACTION_CONTRACT_UPGRADE, BytesReader, CONTRACT_UPGRADE_PAYLOAD_MIN_LENGTH, WormholeError, VAA
+    ACTION_CONTRACT_UPGRADE, BytesReader, CONTRACT_UPGRADE_PAYLOAD_MIN_LENGTH, VAA, WormholeError,
 };
 
 /// Emitted when a contract upgrade is executed successfully.
@@ -62,7 +62,8 @@ impl<'a> TryFrom<(&'a Env, &'a Bytes)> for ContractUpgradePayload {
 }
 
 impl ContractUpgradePayload {
-    /// Validates the governance header matches expected values for upgrade action.
+    /// Validates the governance header matches expected values for upgrade
+    /// action.
     fn validate(&self) -> Result<(), WormholeError> {
         validate_governance_header(
             &self.module,
@@ -83,11 +84,7 @@ impl GovernanceAction for ContractUpgradeAction {
         payload.validate()
     }
 
-    fn execute(
-        env: &Env,
-        _vaa: &VAA,
-        payload: &Self::Payload,
-    ) -> Result<(), WormholeError> {
+    fn execute(env: &Env, _vaa: &VAA, payload: &Self::Payload) -> Result<(), WormholeError> {
         env.deployer()
             .update_current_contract_wasm(payload.new_contract_hash.clone());
 
@@ -133,7 +130,10 @@ mod tests {
             chain: CHAIN_ID_STELLAR,
             new_contract_hash: BytesN::from_array(&env, &[0u8; 32]),
         };
-        assert_eq!(bad_module.validate(), Err(WormholeError::InvalidGovernanceModule));
+        assert_eq!(
+            bad_module.validate(),
+            Err(WormholeError::InvalidGovernanceModule)
+        );
 
         let bad_action = ContractUpgradePayload {
             module: BytesN::from_array(&env, &MODULE_CORE),
@@ -141,7 +141,10 @@ mod tests {
             chain: CHAIN_ID_STELLAR,
             new_contract_hash: BytesN::from_array(&env, &[0u8; 32]),
         };
-        assert_eq!(bad_action.validate(), Err(WormholeError::InvalidGovernanceAction));
+        assert_eq!(
+            bad_action.validate(),
+            Err(WormholeError::InvalidGovernanceAction)
+        );
 
         let bad_chain = ContractUpgradePayload {
             module: BytesN::from_array(&env, &MODULE_CORE),
@@ -149,7 +152,10 @@ mod tests {
             chain: 2,
             new_contract_hash: BytesN::from_array(&env, &[0u8; 32]),
         };
-        assert_eq!(bad_chain.validate(), Err(WormholeError::InvalidGovernanceChain));
+        assert_eq!(
+            bad_chain.validate(),
+            Err(WormholeError::InvalidGovernanceChain)
+        );
     }
 
     #[test]
@@ -160,7 +166,10 @@ mod tests {
         assert_eq!(parsed.action, ACTION_CONTRACT_UPGRADE);
         assert_eq!(parsed.chain, CHAIN_ID_STELLAR);
         assert_eq!(parsed.module, BytesN::from_array(&env, &MODULE_CORE));
-        assert_eq!(parsed.new_contract_hash, BytesN::from_array(&env, &[0xAB; 32]));
+        assert_eq!(
+            parsed.new_contract_hash,
+            BytesN::from_array(&env, &[0xAB; 32])
+        );
     }
 
     #[test]
@@ -175,9 +184,10 @@ mod tests {
             ),
         );
 
-        let wasm_hash = env
-            .deployer()
-            .upload_contract_wasm(Bytes::from_slice(&env, &[0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
+        let wasm_hash = env.deployer().upload_contract_wasm(Bytes::from_slice(
+            &env,
+            &[0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0],
+        ));
         let payload = ContractUpgradePayload {
             module: BytesN::from_array(&env, &MODULE_CORE),
             action: ACTION_CONTRACT_UPGRADE,

@@ -3,7 +3,9 @@
 //! Handles posting messages to be attested by Wormhole guardians, including
 //! fee collection, sequence number management, and event emission.
 
-use soroban_sdk::{Address, Bytes, BytesN, Env, address_payload::AddressPayload, contractevent, token};
+use soroban_sdk::{
+    Address, Bytes, BytesN, Env, address_payload::AddressPayload, contractevent, token,
+};
 use wormhole_soroban_client::{
     CHAIN_ID_STELLAR, ConsistencyLevel, PostedMessageData, STORAGE_TTL_EXTENSION,
     STORAGE_TTL_THRESHOLD, WormholeError,
@@ -192,9 +194,9 @@ pub fn post_message_with_fee(
 #[cfg(test)]
 mod tests {
     use soroban_sdk::{
-        Address, Bytes, BytesN,
+        Address, Bytes, BytesN, IntoVal, Symbol, Val,
         address_payload::AddressPayload,
-        IntoVal, Symbol, Val, map,
+        map,
         testutils::{Address as TestAddress, Events},
         vec,
     };
@@ -242,7 +244,7 @@ mod tests {
 
         let pk_bytes = BytesN::from_array(&env, &[8u8; 32]);
         let emitter = crate::utils::address_from_ed25519_pk_bytes(&env, &pk_bytes);
-        
+
         let res = client.try_post_message(
             &emitter,
             &123u32,
@@ -286,7 +288,7 @@ mod tests {
         off += 4;
         header[off..off + 4].copy_from_slice(&nonce.to_be_bytes());
         off += 4;
-        header[off..off + 2].copy_from_slice(&(CHAIN_ID_STELLAR as u16).to_be_bytes());
+        header[off..off + 2].copy_from_slice(&CHAIN_ID_STELLAR.to_be_bytes());
         off += 2;
         header[off..off + 32].copy_from_slice(&emitter_bytes32.to_array());
         off += 32;
@@ -342,7 +344,10 @@ mod tests {
                     ],
                     map![
                         &env,
-                        (Symbol::new(&env, "consistency_level"), consistency_level_val),
+                        (
+                            Symbol::new(&env, "consistency_level"),
+                            consistency_level_val
+                        ),
                         (Symbol::new(&env, "emitter_address"), emitter_val),
                         (Symbol::new(&env, "nonce"), nonce_val),
                         (Symbol::new(&env, "payload"), payload_val),
@@ -362,7 +367,9 @@ mod tests {
 
         let fee: u64 = 1;
         env.as_contract(&contract_id, || {
-            env.storage().persistent().set(&StorageKey::MessageFee, &fee);
+            env.storage()
+                .persistent()
+                .set(&StorageKey::MessageFee, &fee);
         });
         assert_eq!(client.get_message_fee(), fee);
 
@@ -385,7 +392,9 @@ mod tests {
 
         let fee: u64 = 10_000;
         env.as_contract(&contract_id, || {
-            env.storage().persistent().set(&StorageKey::MessageFee, &fee);
+            env.storage()
+                .persistent()
+                .set(&StorageKey::MessageFee, &fee);
         });
         assert_eq!(client.get_message_fee(), fee);
 

@@ -1,8 +1,8 @@
 //! Common governance action trait and processing utilities.
 //!
-//! Defines the [`GovernanceAction`] trait that all governance actions implement,
-//! providing a standard flow: verify VAA → check replay → parse payload →
-//! validate → consume → execute.
+//! Defines the [`GovernanceAction`] trait that all governance actions
+//! implement, providing a standard flow: verify VAA → check replay → parse
+//! payload → validate → consume → execute.
 
 use crate::{storage::StorageKey, utils::keccak256_hash, vaa::verify_vaa};
 use core::convert::TryFrom;
@@ -161,12 +161,19 @@ mod tests {
     use super::*;
     use crate::{
         Wormhole,
-        governance::{GuardianSetUpgradeAction, SetMessageFeeAction, get_message_fee, guardian_set::get_current_guardian_set_index},
+        governance::{
+            GuardianSetUpgradeAction, SetMessageFeeAction, get_message_fee,
+            guardian_set::get_current_guardian_set_index,
+        },
     };
-    use soroban_sdk::{Bytes, BytesN, Env, IntoVal, Symbol, Vec, testutils::{Events, Ledger}, vec};
+    use soroban_sdk::{
+        Bytes, BytesN, Env, IntoVal, Symbol, Vec,
+        testutils::{Events, Ledger},
+        vec,
+    };
     use wormhole_soroban_client::{
-        ACTION_GUARDIAN_SET_UPGRADE, ACTION_SET_MESSAGE_FEE, ConsistencyLevel, GOVERNANCE_CHAIN_ID, GOVERNANCE_EMITTER,
-        MODULE_CORE, SET_MESSAGE_FEE_PAYLOAD_MIN_LENGTH, Signature, VAA,
+        ACTION_GUARDIAN_SET_UPGRADE, ACTION_SET_MESSAGE_FEE, ConsistencyLevel, GOVERNANCE_CHAIN_ID,
+        GOVERNANCE_EMITTER, MODULE_CORE, SET_MESSAGE_FEE_PAYLOAD_MIN_LENGTH, Signature, VAA,
     };
 
     fn deploy_with_guardian(env: &Env, guardian_eth: BytesN<20>) -> soroban_sdk::Address {
@@ -178,7 +185,10 @@ mod tests {
     fn serialize_vaa(env: &Env, vaa: &VAA) -> Bytes {
         let mut out = Bytes::new(env);
         out.push_back(vaa.version as u8);
-        out.append(&Bytes::from_slice(env, &vaa.guardian_set_index.to_be_bytes()));
+        out.append(&Bytes::from_slice(
+            env,
+            &vaa.guardian_set_index.to_be_bytes(),
+        ));
         out.push_back(vaa.signatures.len() as u8);
 
         for sig in vaa.signatures.iter() {
@@ -190,7 +200,10 @@ mod tests {
 
         out.append(&Bytes::from_slice(env, &vaa.timestamp.to_be_bytes()));
         out.append(&Bytes::from_slice(env, &vaa.nonce.to_be_bytes()));
-        out.append(&Bytes::from_slice(env, &(vaa.emitter_chain as u16).to_be_bytes()));
+        out.append(&Bytes::from_slice(
+            env,
+            &(vaa.emitter_chain as u16).to_be_bytes(),
+        ));
         out.append(&Bytes::from_array(env, &vaa.emitter_address.to_array()));
         out.append(&Bytes::from_slice(env, &vaa.sequence.to_be_bytes()));
         out.push_back(vaa.consistency_level as u8);
@@ -313,7 +326,12 @@ mod tests {
     fn test_validate_governance_header_errors() {
         let bad_module = BytesN::<32>::from_array(&Env::default(), &[1u8; 32]);
         assert_eq!(
-            validate_governance_header(&bad_module, ACTION_SET_MESSAGE_FEE, 61, ACTION_SET_MESSAGE_FEE),
+            validate_governance_header(
+                &bad_module,
+                ACTION_SET_MESSAGE_FEE,
+                61,
+                ACTION_SET_MESSAGE_FEE
+            ),
             Err(WormholeError::InvalidGovernanceModule)
         );
 
@@ -323,11 +341,32 @@ mod tests {
             Err(WormholeError::InvalidGovernanceAction)
         );
         assert_eq!(
-            validate_governance_header(&good_module, ACTION_SET_MESSAGE_FEE, 2, ACTION_SET_MESSAGE_FEE),
+            validate_governance_header(
+                &good_module,
+                ACTION_SET_MESSAGE_FEE,
+                2,
+                ACTION_SET_MESSAGE_FEE
+            ),
             Err(WormholeError::InvalidGovernanceChain)
         );
-        assert!(validate_governance_header(&good_module, ACTION_SET_MESSAGE_FEE, 0, ACTION_SET_MESSAGE_FEE).is_ok());
-        assert!(validate_governance_header(&good_module, ACTION_SET_MESSAGE_FEE, 61, ACTION_SET_MESSAGE_FEE).is_ok());
+        assert!(
+            validate_governance_header(
+                &good_module,
+                ACTION_SET_MESSAGE_FEE,
+                0,
+                ACTION_SET_MESSAGE_FEE
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_governance_header(
+                &good_module,
+                ACTION_SET_MESSAGE_FEE,
+                61,
+                ACTION_SET_MESSAGE_FEE
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -437,7 +476,10 @@ mod tests {
         let contract_id = deploy_with_guardian(&env, guardian_eth);
         env.as_contract(&contract_id, || {
             assert_eq!(SetMessageFeeAction::submit(&env, vaa_fee.clone()), Ok(()));
-            assert_eq!(GuardianSetUpgradeAction::submit(&env, vaa_guardian.clone()), Ok(()));
+            assert_eq!(
+                GuardianSetUpgradeAction::submit(&env, vaa_guardian.clone()),
+                Ok(())
+            );
             assert_eq!(get_message_fee(&env), 99);
             assert_eq!(get_current_guardian_set_index(&env), 1);
 
