@@ -29,9 +29,10 @@ pub fn verify_vaa_signatures(vaa: &VAA, env: &Env) -> Result<bool, WormholeError
 
     if let Some(expiry) =
         governance::guardian_set::get_guardian_set_expiry(env, vaa.guardian_set_index)
-        && env.ledger().timestamp() > expiry {
-            return Err(WormholeError::GuardianSetExpired);
-        }
+        && env.ledger().timestamp() > expiry
+    {
+        return Err(WormholeError::GuardianSetExpired);
+    }
 
     verify_signatures_impl(vaa, env, &body_bytes, &guardian_set_info.keys)
 }
