@@ -150,7 +150,8 @@ impl TestContext {
             .output();
     }
 
-    /// Native XLM token contract ID for the current network (differs per network, e.g. local vs testnet).
+    /// Native XLM token contract ID for the current network (differs per
+    /// network, e.g. local vs testnet).
     pub fn get_native_asset_id(&self) -> String {
         run(Command::new("stellar").args([
             "contract",

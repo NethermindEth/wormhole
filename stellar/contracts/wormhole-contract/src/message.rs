@@ -220,6 +220,10 @@ mod tests {
         }
     }
 
+    fn runtime_test_nonce(env: &Env) -> u32 {
+        u32::try_from(env.ledger().timestamp()).unwrap_or_default()
+    }
+
     #[test]
     fn test_post_message_accepts_generated_contract_emitter() {
         let env = Env::default();
@@ -227,9 +231,10 @@ mod tests {
         env.mock_all_auths();
 
         let emitter = <Address as TestAddress>::generate(&env);
+        let nonce = runtime_test_nonce(&env);
         let res = client.try_post_message(
             &emitter,
-            &123u32,
+            &nonce,
             &Bytes::from_array(&env, &[0xAA]),
             &ConsistencyLevel::Confirmed,
         );
@@ -244,10 +249,11 @@ mod tests {
 
         let pk_bytes = BytesN::from_array(&env, &[8u8; 32]);
         let emitter = crate::utils::address_from_ed25519_pk_bytes(&env, &pk_bytes);
+        let nonce = runtime_test_nonce(&env);
 
         let res = client.try_post_message(
             &emitter,
-            &123u32,
+            &nonce,
             &Bytes::from_array(&env, &[0xAA]),
             &ConsistencyLevel::Confirmed,
         );
@@ -264,7 +270,7 @@ mod tests {
 
         // `post_message` only accepts contract emitters.
         let emitter = contract_id.clone();
-        let nonce = 7u32;
+        let nonce = runtime_test_nonce(&env);
         let payload = Bytes::from_array(&env, &[0xAA, 0xBB, 0xCC]);
         let cl = ConsistencyLevel::Confirmed;
 
@@ -314,7 +320,7 @@ mod tests {
 
         let emitter = contract_id.clone();
         let emitter_bytes32 = address_to_bytes32(&emitter);
-        let nonce = 9u32;
+        let nonce = runtime_test_nonce(&env);
         let payload = Bytes::from_array(&env, &[0xAB, 0xCD]);
         let cl = ConsistencyLevel::Confirmed;
 
@@ -374,9 +380,10 @@ mod tests {
         assert_eq!(client.get_message_fee(), fee);
 
         let emitter = contract_id.clone();
+        let nonce = runtime_test_nonce(&env);
         let res = client.try_post_message(
             &emitter,
-            &1u32,
+            &nonce,
             &Bytes::from_array(&env, &[0x01]),
             &ConsistencyLevel::Confirmed,
         );
@@ -401,7 +408,7 @@ mod tests {
         env.mock_all_auths();
 
         let emitter = <Address as TestAddress>::generate(&env);
-        let nonce = 1u32;
+        let nonce = runtime_test_nonce(&env);
         let payload = Bytes::from_array(&env, &[0x01, 0x02, 0x03]);
         let cl = ConsistencyLevel::Confirmed;
 
@@ -419,7 +426,7 @@ mod tests {
         env.mock_all_auths();
 
         let emitter = contract_id.clone();
-        let nonce = 42u32;
+        let nonce = runtime_test_nonce(&env);
         let payload = Bytes::from_array(&env, &[0xDE, 0xAD, 0xBE, 0xEF]);
         let cl = ConsistencyLevel::Confirmed;
 
@@ -443,7 +450,7 @@ mod tests {
         env.mock_all_auths();
 
         let emitter = contract_id.clone();
-        let nonce = 7u32;
+        let nonce = runtime_test_nonce(&env);
         let payload = Bytes::from_array(&env, &[0xAA, 0xBB, 0xCC]);
         let cl = ConsistencyLevel::Confirmed;
         let ts_u32 = u32::try_from(env.ledger().timestamp()).unwrap_or(0);
