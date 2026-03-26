@@ -19,7 +19,8 @@ fn integration_contract_upgrade_flow() {
     gov_emitter_arr[31] = 4;
     let gov_emitter_hex = hex::encode(gov_emitter_arr);
 
-    let contract_id = ctx.deploy_contract(&[guardian_addr_hex.clone()], &gov_emitter_hex);
+    let contract_id =
+        ctx.deploy_contract(std::slice::from_ref(&guardian_addr_hex), &gov_emitter_hex);
     println!("Contract deployed at: {}", contract_id);
 
     // Verify initial chain ID
