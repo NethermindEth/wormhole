@@ -1,18 +1,24 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Environment
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/../.env.localnet"
 
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  source "$ENV_FILE"
-  set +a
-else
-  echo "Environment file $ENV_FILE not found"
+die() {
+  echo "$*" >&2
   exit 1
-fi
+}
+
+[ -f "$ENV_FILE" ] || die "Environment file $ENV_FILE not found"
+
+# Load localnet defaults for funding the configured identity.
+# shellcheck disable=SC1091
+source "$ENV_FILE"
+
+: "${STELLAR_NETWORK:?STELLAR_NETWORK not set}"
+: "${STELLAR_IDENTITY:?STELLAR_IDENTITY not set}"
+: "${SOROBAN_RPC_URL:?SOROBAN_RPC_URL not set}"
+: "${STELLAR_NETWORK_PASSPHRASE:?STELLAR_NETWORK_PASSPHRASE not set}"
 
 echo "Configuring stellar network: $STELLAR_NETWORK"
 stellar network rm "$STELLAR_NETWORK" >/dev/null 2>&1 || true
@@ -25,8 +31,8 @@ if ! stellar keys address "$STELLAR_IDENTITY" >/dev/null 2>&1; then
   stellar keys generate --network "$STELLAR_NETWORK" "$STELLAR_IDENTITY"
 fi
 
-IDENTITY_ADDR=$(stellar keys address "$STELLAR_IDENTITY")
-IDENTITY_ADDR=$(echo "$IDENTITY_ADDR" | tr -d '\r\n')
+IDENTITY_ADDR="$(stellar keys address "$STELLAR_IDENTITY")"
+IDENTITY_ADDR="$(echo "$IDENTITY_ADDR" | tr -d '\r\n')"
 echo "Funding identity $STELLAR_IDENTITY ($IDENTITY_ADDR) via friendbot..."
 # Retry on 502 (friendbot may still be starting)
 FRIENDBOT_RESPONSE=""

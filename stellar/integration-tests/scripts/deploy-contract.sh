@@ -1,39 +1,52 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Load environment variables
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV_FILE="$SCRIPT_DIR/../.env.localnet"
 
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  source "$ENV_FILE"
-  set +a
-else
-  echo "Environment file $ENV_FILE not found"
+die() {
+  echo "$*" >&2
   exit 1
-fi
+}
 
-# Change to project root
-cd "$SCRIPT_DIR/../.."
-PROJECT_ROOT=$(pwd)
+[ -f "$ENV_FILE" ] || die "Environment file $ENV_FILE not found"
+
+# Load localnet defaults for deploy-time network, identity, and wasm path.
+# shellcheck disable=SC1091
+source "$ENV_FILE"
+
+: "${STELLAR_NETWORK:?STELLAR_NETWORK not set}"
+: "${STELLAR_IDENTITY:?STELLAR_IDENTITY not set}"
+: "${SOROBAN_RPC_URL:?SOROBAN_RPC_URL not set}"
+: "${STELLAR_NETWORK_PASSPHRASE:?STELLAR_NETWORK_PASSPHRASE not set}"
+: "${WORMHOLE_WASM_PATH:?WORMHOLE_WASM_PATH not set}"
 
 if [[ "$WORMHOLE_WASM_PATH" != /* ]]; then
-  export WORMHOLE_WASM_PATH="$PROJECT_ROOT/$WORMHOLE_WASM_PATH"
+  # Resolve the configured wasm path relative to the workspace root.
+  WORMHOLE_WASM_PATH="$PROJECT_ROOT/$WORMHOLE_WASM_PATH"
 fi
 
-# Ensure WASM is built
-if [ ! -f "$WORMHOLE_WASM_PATH" ]; then
-  echo "WASM file not found at $WORMHOLE_WASM_PATH. Building contracts..."
-  stellar contract build
-fi
-
-# Constructor args: one guardian (20-byte hex) and governance emitter (32-byte hex) for localnet
+# Constructor args: one guardian (20-byte hex) and governance emitter
+# (32-byte hex) for localnet.
 INITIAL_GUARDIANS='["0101010101010101010101010101010101010101"]'
 GOVERNANCE_EMITTER="0404040404040404040404040404040404040404040404040404040404040404"
 
+echo "Configuring stellar network: $STELLAR_NETWORK"
+stellar network rm "$STELLAR_NETWORK" >/dev/null 2>&1 || true
+stellar network add "$STELLAR_NETWORK" \
+  --rpc-url "$SOROBAN_RPC_URL" \
+  --network-passphrase "$STELLAR_NETWORK_PASSPHRASE"
+
+if [ ! -f "$WORMHOLE_WASM_PATH" ]; then
+  echo "WASM file not found at $WORMHOLE_WASM_PATH. Building contracts..."
+  (
+    cd "$PROJECT_ROOT"
+    stellar contract build
+  )
+fi
+
 echo "Deploying contract to $STELLAR_NETWORK..."
-# We use the identity and network from the environment file
 CONTRACT_ID=$(stellar contract deploy \
   --network "$STELLAR_NETWORK" \
   --source "$STELLAR_IDENTITY" \
