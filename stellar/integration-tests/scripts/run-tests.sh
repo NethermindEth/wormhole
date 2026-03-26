@@ -10,6 +10,14 @@ die() {
   exit 1
 }
 
+cleanup() {
+  if [[ -n "${LIB_RS:-}" && -f "${LIB_RS}.bak" ]]; then
+    mv "${LIB_RS}.bak" "$LIB_RS"
+  fi
+}
+
+trap cleanup EXIT
+
 [ -f "$ENV_FILE" ] || die "Environment file $ENV_FILE not found"
 
 # Load the localnet configuration consumed by both the shell wrapper and the
@@ -50,7 +58,6 @@ stellar contract build
 cp target/wasm32v1-none/release/wormhole_contract.wasm target/wasm32v1-none/release/wormhole_contract_upgrade.wasm
 
 # Restore original source and WASM file
-mv "$LIB_RS.bak" "$LIB_RS"
 touch "$LIB_RS"
 cp target/wasm32v1-none/release/wormhole_contract_original.wasm target/wasm32v1-none/release/wormhole_contract.wasm
 
