@@ -56,7 +56,6 @@ pub struct TestContext {
     pub admin_identity: String,
     pub rpc_url: String,
     pub wasm_path: String,
-    pub friendbot_url: String,
 }
 
 impl Default for TestContext {
@@ -72,8 +71,6 @@ impl TestContext {
             admin_identity: std::env::var("STELLAR_IDENTITY").expect("STELLAR_IDENTITY not set"),
             rpc_url: std::env::var("SOROBAN_RPC_URL").expect("SOROBAN_RPC_URL not set"),
             wasm_path: std::env::var("WORMHOLE_WASM_PATH").expect("WORMHOLE_WASM_PATH not set"),
-            friendbot_url: std::env::var("STELLAR_FRIENDBOT_URL")
-                .expect("STELLAR_FRIENDBOT_URL not set"),
         }
     }
 
@@ -112,10 +109,8 @@ impl TestContext {
         .to_string()
     }
 
-    pub fn fund_account(&self, address: &str) {
-        run(Command::new("curl")
-            .arg("-s")
-            .arg(format!("{}?addr={}", self.friendbot_url, address)));
+    pub fn fund_identity(&self, name: &str) {
+        run(Command::new("stellar").args(["keys", "fund", "--network", &self.network, name]));
     }
 
     pub fn get_identity_address(&self, name: &str) -> String {
@@ -130,7 +125,7 @@ impl TestContext {
         let addr = run(Command::new("stellar").args(["keys", "address", name]))
             .trim()
             .to_string();
-        self.fund_account(&addr);
+        self.fund_identity(name);
         addr
     }
 

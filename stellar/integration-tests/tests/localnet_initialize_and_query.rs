@@ -5,9 +5,7 @@ use integration_tests::{TestContext, find_event};
 fn testnet_initialize_and_query() {
     let ctx = TestContext::new();
 
-    // Fund account via friendbot
-    let admin_addr = ctx.get_identity_address(&ctx.admin_identity);
-    ctx.fund_account(&admin_addr);
+    ctx.fund_identity(&ctx.admin_identity);
 
     // Deploy with constructor (initializes in one step)
     let guardian1 = "0101010101010101010101010101010101010101";

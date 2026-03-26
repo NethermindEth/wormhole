@@ -20,7 +20,6 @@ source "$ENV_FILE"
 : "${STELLAR_NETWORK:?STELLAR_NETWORK not set}"
 : "${STELLAR_IDENTITY:?STELLAR_IDENTITY not set}"
 : "${SOROBAN_RPC_URL:?SOROBAN_RPC_URL not set}"
-: "${STELLAR_FRIENDBOT_URL:?STELLAR_FRIENDBOT_URL not set}"
 : "${WORMHOLE_WASM_PATH:?WORMHOLE_WASM_PATH not set}"
 
 if [[ "$WORMHOLE_WASM_PATH" != /* ]]; then
@@ -33,7 +32,6 @@ fi
 export STELLAR_NETWORK
 export STELLAR_IDENTITY
 export SOROBAN_RPC_URL
-export STELLAR_FRIENDBOT_URL
 export WORMHOLE_WASM_PATH
 
 echo "Building contracts using stellar contract build..."
