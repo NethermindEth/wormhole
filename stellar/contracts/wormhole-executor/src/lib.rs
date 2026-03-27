@@ -127,6 +127,7 @@ impl ExecutorTrait for Executor {
         env.storage().instance().get(&DataKey::ChainId).unwrap()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn request_execution(
         env: Env,
         dst_chain: u32,
