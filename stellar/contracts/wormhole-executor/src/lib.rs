@@ -110,7 +110,7 @@ pub trait ExecutorTrait {
         signed_quote: Bytes,
         request: Bytes,
         relay_instructions: Option<Bytes>,
-    );
+    ) -> Result<(), ExecError>;
 }
 
 #[contract]
@@ -143,36 +143,29 @@ impl ExecutorTrait for Executor {
         signed_quote: Bytes,
         request: Bytes,
         relay_instructions: Option<Bytes>,
-    ) {
-        if signed_quote.len() == 0 {
-            soroban_sdk::panic_with_error!(&env, ExecError::EmptyQuote);
+    ) -> Result<(), ExecError> {
+        if signed_quote.is_empty() {
+            return Err(ExecError::EmptyQuote);
         }
-        if request.len() == 0 {
-            soroban_sdk::panic_with_error!(&env, ExecError::EmptyRequest);
+        if request.is_empty() {
+            return Err(ExecError::EmptyRequest);
         }
 
         let this_chain = Self::chain_id(env.clone());
-
-        let pq = match parse_signed_quote_min(&signed_quote) {
-            Ok(p) => p,
-            Err(e) => soroban_sdk::panic_with_error!(&env, e),
-        };
+        let pq = parse_signed_quote_min(&signed_quote)?;
 
         if pq.src_chain != this_chain {
-            soroban_sdk::panic_with_error!(&env, ExecError::QuoteChainMismatch);
+            return Err(ExecError::QuoteChainMismatch);
         }
         if pq.dst_chain != dst_chain {
-            soroban_sdk::panic_with_error!(&env, ExecError::RequestDstMismatch);
+            return Err(ExecError::RequestDstMismatch);
         }
 
         let now = env.ledger().timestamp();
         if pq.expiry < now {
-            soroban_sdk::panic_with_error!(&env, ExecError::QuoteExpired);
+            return Err(ExecError::QuoteExpired);
         }
-
-        if let Err(e) = parse_request_min(&request) {
-            soroban_sdk::panic_with_error!(&env, e);
-        }
+        parse_request_min(&request)?;
 
         let evt = ExecutionRequested {
             quoter_wa32: Some(pq.quoter_wa32),
@@ -187,11 +180,7 @@ impl ExecutorTrait for Executor {
             relay_instructions,
         };
 
-        let core_addr = env
-            .storage()
-            .instance()
-            .get::<_, Address>(&DataKey::CoreAddress)
-            .unwrap();
+        let core_addr = env.storage().instance().get(&DataKey::CoreAddress).unwrap();
         let client = WormholeClient::new(&env, &core_addr);
 
         let mut payload = Bytes::new(&env);
@@ -208,6 +197,7 @@ impl ExecutorTrait for Executor {
         );
 
         evt.publish(&env);
+        Ok(())
     }
 }
 
