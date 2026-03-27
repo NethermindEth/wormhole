@@ -11,7 +11,6 @@ const REQ_EXEC_PREFIX: &[u8; 4] = b"ERV1";
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ExecError {
-    NotInitialized = 1,
     InvalidQuotePrefix = 10,
     InvalidRequestPrefix = 11,
     QuoteExpired = 12,
@@ -125,11 +124,7 @@ impl ExecutorTrait for Executor {
     }
 
     fn chain_id(env: Env) -> u32 {
-        let store = env.storage().instance();
-        if !store.has(&DataKey::ChainId) {
-            soroban_sdk::panic_with_error!(&env, ExecError::NotInitialized);
-        }
-        store.get::<_, u32>(&DataKey::ChainId).unwrap()
+        env.storage().instance().get(&DataKey::ChainId).unwrap()
     }
 
     fn request_execution(
