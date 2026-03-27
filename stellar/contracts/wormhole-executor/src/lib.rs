@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, Symbol, contract, contracterror, contractimpl, contracttype,
+    Address, Bytes, BytesN, Env, contract, contracterror, contractevent, contractimpl, contracttype,
 };
 use wormhole_soroban_client::{BytesReader, ConsistencyLevel, WormholeClient, WormholeError};
 
@@ -29,7 +29,7 @@ pub enum DataKey {
     CoreAddress,
 }
 
-#[contracttype]
+#[contractevent(topics = ["Executor", "ExecutionRequested"])]
 #[derive(Clone)]
 pub struct ExecutionRequested {
     pub quoter_wa32: Option<BytesN<32>>,
@@ -207,13 +207,7 @@ impl ExecutorTrait for Executor {
             &ConsistencyLevel::Confirmed,
         );
 
-        env.events().publish(
-            (
-                Symbol::new(&env, "Executor"),
-                Symbol::new(&env, "ExecutionRequested"),
-            ),
-            evt,
-        );
+        evt.publish(&env);
     }
 }
 
@@ -221,7 +215,7 @@ impl ExecutorTrait for Executor {
 mod test {
     use super::*;
     use soroban_sdk::{
-        Address, Bytes, BytesN, Env, Symbol, TryFromVal, Val, Vec, contract, contractimpl,
+        Address, Bytes, BytesN, Env, Event, contract, contractimpl,
         testutils::{Events, Ledger},
     };
 
@@ -249,7 +243,7 @@ mod test {
 
     // ---------------------- Helpers ----------------------
 
-    fn register_executor(env: &Env, chain_id: u32) -> (ExecutorClient, Address) {
+    fn register_executor(env: &Env, chain_id: u32) -> (ExecutorClient<'_>, Address) {
         let core_addr = env.register(MockCore, ());
         let exec_addr = env.register(Executor, (&chain_id, &core_addr));
         let client = ExecutorClient::new(env, &exec_addr);
@@ -294,31 +288,13 @@ mod test {
         r
     }
 
-    /// Return last event's topics and decoded data using `soroban_sdk::Vec`
-    /// APIs.
-    fn decode_last_evt<T: TryFromVal<Env, Val>>(env: &Env) -> (Vec<Val>, T) {
-        let entries: Vec<(Address, Vec<Val>, Val)> = env.events().all();
+    fn last_contract_event(env: &Env, contract_id: &Address) -> soroban_sdk::xdr::ContractEvent {
+        let filtered = env.events().all().filter_by_contract(contract_id);
+        let entries = filtered.events();
         let len = entries.len();
         assert!(len > 0, "no events were emitted");
         let last_idx = len - 1;
-        let (_addr, topics, data) = entries.get(last_idx).expect("index out of bounds");
-        let parsed: T = T::try_from_val(env, &data).expect("failed to decode event data");
-        (topics, parsed)
-    }
-
-    /// Convert topics (Vec<Val>) to Vec<Symbol> without std::iter::collect().
-    fn topic_symbols(env: &Env, topics: &Vec<Val>) -> Vec<Symbol> {
-        let mut out: Vec<Symbol> = Vec::new(env);
-        let n = topics.len();
-        let mut i = 0u32;
-        while i < n {
-            let v = topics.get(i).unwrap();
-            if let Ok(sym) = Symbol::try_from_val(env, &v) {
-                out.push_back(sym);
-            }
-            i += 1;
-        }
-        out
+        entries.get(last_idx).expect("index out of bounds").clone()
     }
 
     // ---------------------- Tests ----------------------
@@ -340,7 +316,7 @@ mod test {
 
         let src_chain = 1234u16;
         let dst_chain = 4321u16;
-        let (client, _addr) = register_executor(&env, src_chain as u32);
+        let (client, addr) = register_executor(&env, src_chain as u32);
 
         let signed_quote = mk_signed_quote(&env, src_chain, dst_chain, 600);
         let request = mk_request(&env);
@@ -361,38 +337,19 @@ mod test {
             &None,
         );
 
-        let (topics, evt): (Vec<Val>, ExecutionRequested) = decode_last_evt(&env);
-        let syms = topic_symbols(&env, &topics);
-
-        // Expect topics contain "Executor" and "ExecutionRequested"
-        let mut found_exec = false;
-        let mut found_er = false;
-        let n = syms.len();
-        let mut i = 0;
-        while i < n {
-            let s = syms.get(i).unwrap();
-            if s == Symbol::new(&env, "Executor") {
-                found_exec = true;
-            }
-            if s == Symbol::new(&env, "ExecutionRequested") {
-                found_er = true;
-            }
-            i += 1;
-        }
-        assert!(
-            found_exec && found_er,
-            "expected Executor/ExecutionRequested topics"
-        );
-
-        assert_eq!(evt.dst_chain, dst_chain as u32);
-        assert_eq!(evt.dst_addr_wa32, dst_addr_wa32);
-        assert_eq!(evt.payee, payee);
-        assert_eq!(evt.refund, refund);
-        assert!(evt.quoter_wa32.is_some());
-        assert_eq!(evt.fee_token, None);
-        assert_eq!(evt.fee_amount, None);
-        assert_eq!(evt.signed_quote.len(), signed_quote.len());
-        assert_eq!(evt.request.len(), request.len());
+        let expected_evt = ExecutionRequested {
+            quoter_wa32: Some(BytesN::<32>::from_array(&env, &[0u8; 32])),
+            payee: payee.clone(),
+            dst_chain: dst_chain as u32,
+            dst_addr_wa32: dst_addr_wa32.clone(),
+            refund: refund.clone(),
+            fee_token: None,
+            fee_amount: None,
+            signed_quote: signed_quote.clone(),
+            request: request.clone(),
+            relay_instructions: None,
+        };
+        assert_eq!(last_contract_event(&env, &addr), expected_evt.to_xdr(&env, &addr));
     }
 
     #[test]
@@ -400,7 +357,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
 
-        let (client, _addr) = register_executor(&env, 100);
+        let (client, addr) = register_executor(&env, 100);
         let payee = env.register(Dummy, ());
         let refund = env.register(Dummy, ());
         let dst_addr_wa32 = BytesN::<32>::from_array(&env, &[8u8; 32]);
@@ -420,8 +377,19 @@ mod test {
                 &r,
                 &None,
             );
-            let (_t, evt): (Vec<Val>, ExecutionRequested) = decode_last_evt(&env);
-            assert_eq!(evt.dst_chain, 200u32);
+            let expected_evt = ExecutionRequested {
+                quoter_wa32: Some(BytesN::<32>::from_array(&env, &[0u8; 32])),
+                payee: payee.clone(),
+                dst_chain: 200u32,
+                dst_addr_wa32: dst_addr_wa32.clone(),
+                refund: refund.clone(),
+                fee_token: None,
+                fee_amount: None,
+                signed_quote: q.clone(),
+                request: r.clone(),
+                relay_instructions: None,
+            };
+            assert_eq!(last_contract_event(&env, &addr), expected_evt.to_xdr(&env, &addr));
         }
 
         // Second request: expect dst_chain = 201 (verifies a new latest event)
@@ -439,8 +407,19 @@ mod test {
                 &r,
                 &None,
             );
-            let (_t, evt): (Vec<Val>, ExecutionRequested) = decode_last_evt(&env);
-            assert_eq!(evt.dst_chain, 201u32);
+            let expected_evt = ExecutionRequested {
+                quoter_wa32: Some(BytesN::<32>::from_array(&env, &[0u8; 32])),
+                payee: payee.clone(),
+                dst_chain: 201u32,
+                dst_addr_wa32: dst_addr_wa32.clone(),
+                refund: refund.clone(),
+                fee_token: None,
+                fee_amount: None,
+                signed_quote: q.clone(),
+                request: r.clone(),
+                relay_instructions: None,
+            };
+            assert_eq!(last_contract_event(&env, &addr), expected_evt.to_xdr(&env, &addr));
         }
     }
 
