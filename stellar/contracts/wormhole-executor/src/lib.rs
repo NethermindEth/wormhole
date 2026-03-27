@@ -1,21 +1,9 @@
 #![no_std]
 
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, Symbol, contract, contractclient, contracterror, contractimpl,
-    contracttype,
+    Address, Bytes, BytesN, Env, Symbol, contract, contracterror, contractimpl, contracttype,
 };
-// use wormhole_soroban_client::{WormholeCoreInterface, ConsistencyLevel};
-
-#[contractclient(name = "WormholeCoreClient")]
-pub trait WormholeClient {
-    fn post_message(
-        env: Env,
-        emitter: Address,
-        nonce: u32,
-        payload: Bytes,
-        consistency_level: u32, // Use u32 for simplicity matching the enum
-    ) -> Result<u64, soroban_sdk::Error>;
-}
+use wormhole_soroban_client::{ConsistencyLevel, WormholeClient};
 
 const SIGNED_QUOTE_PREFIX: &[u8; 4] = b"EQ01";
 const REQ_EXEC_PREFIX: &[u8; 4] = b"ERV1";
@@ -237,7 +225,7 @@ impl ExecutorTrait for Executor {
             .instance()
             .get::<_, Address>(&DataKey::CoreAddress)
             .unwrap();
-        let client = WormholeCoreClient::new(&env, &core_addr);
+        let client = WormholeClient::new(&env, &core_addr);
 
         let mut payload = Bytes::new(&env);
         payload.append(&evt.signed_quote);
@@ -249,7 +237,7 @@ impl ExecutorTrait for Executor {
             &env.current_contract_address(),
             &nonce,
             &payload,
-            &1, // ConsistencyLevel::Confirmed
+            &ConsistencyLevel::Confirmed,
         );
 
         env.events().publish(
