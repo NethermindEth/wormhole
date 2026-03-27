@@ -12,7 +12,6 @@ const REQ_EXEC_PREFIX: &[u8; 4] = b"ERV1";
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ExecError {
     NotInitialized = 1,
-    AlreadyInitialized = 2,
     InvalidQuotePrefix = 10,
     InvalidRequestPrefix = 11,
     QuoteExpired = 12,
@@ -95,7 +94,7 @@ fn parse_request_min(req: &Bytes) -> Result<(), ExecError> {
 }
 
 pub trait ExecutorTrait {
-    fn init(env: Env, chain_id: u32, core_address: Address);
+    fn __constructor(env: Env, chain_id: u32, core_address: Address);
 
     fn chain_id(env: Env) -> u32;
     #[allow(clippy::too_many_arguments)]
@@ -119,11 +118,8 @@ pub struct Executor;
 
 #[contractimpl]
 impl ExecutorTrait for Executor {
-    fn init(env: Env, chain_id: u32, core_address: Address) {
+    fn __constructor(env: Env, chain_id: u32, core_address: Address) {
         let store = env.storage().instance();
-        if store.has(&DataKey::ChainId) {
-            soroban_sdk::panic_with_error!(&env, ExecError::AlreadyInitialized);
-        }
         store.set(&DataKey::ChainId, &chain_id);
         store.set(&DataKey::CoreAddress, &core_address);
     }
@@ -255,9 +251,8 @@ mod test {
 
     fn register_executor(env: &Env, chain_id: u32) -> (ExecutorClient, Address) {
         let core_addr = env.register(MockCore, ());
-        let exec_addr = env.register(Executor, ());
+        let exec_addr = env.register(Executor, (&chain_id, &core_addr));
         let client = ExecutorClient::new(env, &exec_addr);
-        client.init(&chain_id, &core_addr);
         (client, exec_addr)
     }
 
@@ -336,30 +331,6 @@ mod test {
         let (client, _addr) = register_executor(&env, 1234u32);
         let got = client.chain_id();
         assert_eq!(got, 1234u32);
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #2)")] // AlreadyInitialized
-    fn init_twice_panics() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let exec_addr = env.register(Executor, ());
-        let client = ExecutorClient::new(&env, &exec_addr);
-        let core_addr = env.register(MockCore, ());
-        client.init(&7u32, &core_addr);
-        client.init(&7u32, &core_addr); // should panic with AlreadyInitialized
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #1)")] // NotInitialized
-    fn chain_id_without_init_panics() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let exec_addr = env.register(Executor, ());
-        let client = ExecutorClient::new(&env, &exec_addr);
-        let _ = client.chain_id(); // should panic
     }
 
     #[test]
