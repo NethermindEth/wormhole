@@ -3,7 +3,7 @@
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, Symbol, contract, contracterror, contractimpl, contracttype,
 };
-use wormhole_soroban_client::{ConsistencyLevel, WormholeClient};
+use wormhole_soroban_client::{BytesReader, ConsistencyLevel, WormholeClient, WormholeError};
 
 const SIGNED_QUOTE_PREFIX: &[u8; 4] = b"EQ01";
 const REQ_EXEC_PREFIX: &[u8; 4] = b"ERV1";
@@ -50,34 +50,8 @@ pub struct ExecutionRequested {
     pub relay_instructions: Option<Bytes>,
 }
 
-fn bytes_eq_prefix(_env: &Env, b: &Bytes, start: u32, prefix: &[u8]) -> bool {
-    if b.len() < start + prefix.len() as u32 {
-        return false;
-    }
-    for (i, v) in prefix.iter().enumerate() {
-        if b.get(start + i as u32).unwrap() != *v {
-            return false;
-        }
-    }
-    true
-}
-
-fn read_fixed<const N: usize>(b: &Bytes, start: u32) -> [u8; N] {
-    let mut out = [0u8; N];
-    for i in 0..N {
-        out[i] = b.get(start + i as u32).unwrap();
-    }
-    out
-}
-
-fn be_u16_at(b: &Bytes, start: u32) -> u16 {
-    u16::from_be_bytes(read_fixed::<2>(b, start))
-}
-fn be_u32_at(b: &Bytes, start: u32) -> u32 {
-    u32::from_be_bytes(read_fixed::<4>(b, start))
-}
-fn be_u64_at(b: &Bytes, start: u32) -> u64 {
-    u64::from_be_bytes(read_fixed::<8>(b, start))
+fn map_reader_err(_err: WormholeError) -> ExecError {
+    ExecError::BadLengths
 }
 
 struct ParsedQuote {
@@ -88,21 +62,19 @@ struct ParsedQuote {
     expiry: u64,
 }
 
-fn parse_signed_quote_min(env: &Env, quote: &Bytes) -> Result<ParsedQuote, ExecError> {
-    // Expected minimum: 4 (prefix) + 32 (quoter) + 32 (payee) + 2 + 2 + 8 = 80
-    // bytes
-    if quote.len() < 80 {
-        return Err(ExecError::BadLengths);
-    }
-    if !bytes_eq_prefix(env, quote, 0, SIGNED_QUOTE_PREFIX) {
+fn parse_signed_quote_min(quote: &Bytes) -> Result<ParsedQuote, ExecError> {
+    let mut reader = BytesReader::new(quote);
+
+    let prefix = reader.read_bytes_n::<4>().map_err(map_reader_err)?;
+    if prefix.to_array() != *SIGNED_QUOTE_PREFIX {
         return Err(ExecError::InvalidQuotePrefix);
     }
 
-    let quoter_wa32 = BytesN::<32>::from_array(env, &read_fixed::<32>(quote, 4));
-    let payee_wa32 = BytesN::<32>::from_array(env, &read_fixed::<32>(quote, 36));
-    let src_chain = be_u16_at(quote, 68) as u32;
-    let dst_chain = be_u16_at(quote, 70) as u32;
-    let expiry = be_u64_at(quote, 72);
+    let quoter_wa32 = reader.read_bytes_n::<32>().map_err(map_reader_err)?;
+    let payee_wa32 = reader.read_bytes_n::<32>().map_err(map_reader_err)?;
+    let src_chain = u32::from(reader.read_u16_be().map_err(map_reader_err)?);
+    let dst_chain = u32::from(reader.read_u16_be().map_err(map_reader_err)?);
+    let expiry = reader.read_u64_be().map_err(map_reader_err)?;
 
     Ok(ParsedQuote {
         quoter_wa32,
@@ -113,11 +85,10 @@ fn parse_signed_quote_min(env: &Env, quote: &Bytes) -> Result<ParsedQuote, ExecE
     })
 }
 
-fn parse_request_min(_env: &Env, req: &Bytes) -> Result<(), ExecError> {
-    if req.len() < 4 {
-        return Err(ExecError::BadLengths);
-    }
-    if !bytes_eq_prefix(_env, req, 0, REQ_EXEC_PREFIX) {
+fn parse_request_min(req: &Bytes) -> Result<(), ExecError> {
+    let mut reader = BytesReader::new(req);
+    let prefix = reader.read_bytes_n::<4>().map_err(map_reader_err)?;
+    if prefix.to_array() != *REQ_EXEC_PREFIX {
         return Err(ExecError::InvalidRequestPrefix);
     }
     Ok(())
@@ -186,7 +157,7 @@ impl ExecutorTrait for Executor {
 
         let this_chain = Self::chain_id(env.clone());
 
-        let pq = match parse_signed_quote_min(&env, &signed_quote) {
+        let pq = match parse_signed_quote_min(&signed_quote) {
             Ok(p) => p,
             Err(e) => soroban_sdk::panic_with_error!(&env, e),
         };
@@ -203,7 +174,7 @@ impl ExecutorTrait for Executor {
             soroban_sdk::panic_with_error!(&env, ExecError::QuoteExpired);
         }
 
-        if let Err(e) = parse_request_min(&env, &request) {
+        if let Err(e) = parse_request_min(&request) {
             soroban_sdk::panic_with_error!(&env, e);
         }
 
