@@ -334,7 +334,10 @@ mod test {
             request: request.clone(),
             relay_instructions: None,
         };
-        assert_eq!(last_contract_event(&env, &addr), expected_evt.to_xdr(&env, &addr));
+        assert_eq!(
+            last_contract_event(&env, &addr),
+            expected_evt.to_xdr(&env, &addr)
+        );
     }
 
     #[test]
@@ -374,7 +377,10 @@ mod test {
                 request: r.clone(),
                 relay_instructions: None,
             };
-            assert_eq!(last_contract_event(&env, &addr), expected_evt.to_xdr(&env, &addr));
+            assert_eq!(
+                last_contract_event(&env, &addr),
+                expected_evt.to_xdr(&env, &addr)
+            );
         }
 
         // Second request: expect dst_chain = 201 (verifies a new latest event)
@@ -404,7 +410,10 @@ mod test {
                 request: r.clone(),
                 relay_instructions: None,
             };
-            assert_eq!(last_contract_event(&env, &addr), expected_evt.to_xdr(&env, &addr));
+            assert_eq!(
+                last_contract_event(&env, &addr),
+                expected_evt.to_xdr(&env, &addr)
+            );
         }
     }
 
