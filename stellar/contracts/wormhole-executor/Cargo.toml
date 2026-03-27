@@ -12,5 +12,5 @@ doctest = false
 soroban-sdk = { workspace = true }
 wormhole-soroban-client = { workspace = true }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+[dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
