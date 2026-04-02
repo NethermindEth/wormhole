@@ -267,7 +267,7 @@ pub trait WormholeCoreInterface {
     ///
     /// # Errors
     /// * `Error::InvalidVAAFormat` - Malformed VAA bytes
-    fn is_governance_vaa_consumed(env: Env, vaa_bytes: Bytes) -> Result<(), WormholeError>;
+    fn is_governance_vaa_consumed(env: Env, vaa_bytes: Bytes) -> Result<bool, WormholeError>;
 
     // ========== Protocol Constants ==========
 

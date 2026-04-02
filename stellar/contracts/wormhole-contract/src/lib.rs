@@ -149,7 +149,7 @@ impl WormholeCoreInterface for Wormhole {
         token_client.balance(&env.current_contract_address())
     }
 
-    fn is_governance_vaa_consumed(env: Env, vaa_bytes: Bytes) -> Result<(), WormholeError> {
+    fn is_governance_vaa_consumed(env: Env, vaa_bytes: Bytes) -> Result<bool, WormholeError> {
         governance::is_governance_vaa_consumed(env, vaa_bytes)
     }
 
