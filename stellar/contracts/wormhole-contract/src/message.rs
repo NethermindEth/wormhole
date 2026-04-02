@@ -138,6 +138,12 @@ pub fn post_message_with_fee(
     let required_fee = governance::get_message_fee(env);
 
     if required_fee > 0 {
+        env.storage().persistent().extend_ttl(
+            &StorageKey::MessageFee,
+            STORAGE_TTL_THRESHOLD,
+            STORAGE_TTL_EXTENSION,
+        );
+
         let native_token = get_native_token_address(env);
         let token_client = token::TokenClient::new(env, &native_token);
         let contract = env.current_contract_address();
