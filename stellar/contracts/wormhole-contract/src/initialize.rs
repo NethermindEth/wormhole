@@ -1,7 +1,7 @@
 //! Contract initialization logic.
 //!
 //! Handles setup of the Wormhole Core contract via the `__constructor` function,
-//! including guardian set creation, admin configuration, and governance emitter storage.
+//! including guardian set creation and governance emitter storage.
 //!
 //! This module is only called by the constructor, which is executed atomically
 //! during deployment (Protocol 22+). The runtime guarantees single execution.
@@ -30,8 +30,8 @@ struct InitializeEvent {
 
 /// Internal initialization logic called by `__constructor`.
 ///
-/// Sets up the initial guardian set (index 0), configures the contract as its own
-/// admin for upgrades, and stores the governance emitter address.
+/// Sets up the initial guardian set (index 0) and stores the governance emitter
+/// address.
 ///
 /// # Arguments
 /// * `initial_guardians` - Ethereum addresses (20 bytes) of initial guardians
@@ -48,12 +48,6 @@ pub(crate) fn initialize_internal(
     if initial_guardians.is_empty() {
         env.panic_with_error(WormholeError::EmptyGuardianSet);
     }
-
-    // Set contract as its own admin for upgrades
-    let contract_address = env.current_contract_address();
-    env.storage()
-        .instance()
-        .set(&StorageKey::Admin, &contract_address);
 
     // Store governance emitter address
     env.storage()

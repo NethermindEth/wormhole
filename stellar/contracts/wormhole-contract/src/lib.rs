@@ -45,8 +45,7 @@ pub struct Wormhole;
 impl Wormhole {
     /// Constructor called atomically during contract deployment.
     ///
-    /// Sets up the initial guardian set (index 0), configures the contract as
-    /// its own admin for governance upgrades, and stores the governance
+    /// Sets up the initial guardian set (index 0) and stores the governance
     /// emitter address.
     ///
     /// # Arguments
