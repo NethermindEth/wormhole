@@ -114,12 +114,24 @@ fn verify_signatures_impl(
     Ok(true)
 }
 
-/// Parses and verifies a VAA in a single call.
+/// Parses a VAA and verifies all guardian signatures in a single call.
 ///
-/// Combines `VAA::try_from` parsing with full signature verification.
-pub fn verify_vaa(env: &Env, vaa_bytes: &Bytes) -> Result<bool, WormholeError> {
+/// This is the primary entry point for external integrators who need both
+/// parsing and verification. Avoids the double parse that occurs when
+/// calling `verify_vaa` and `parse_vaa` separately.
+pub fn parse_and_verify_vaa(env: &Env, vaa_bytes: &Bytes) -> Result<VAA, WormholeError> {
     let vaa = VAA::try_from((env, vaa_bytes))?;
-    verify_vaa_signatures(&vaa, env)
+    verify_vaa_signatures(&vaa, env)?;
+    Ok(vaa)
+}
+
+/// Verifies a VAA's guardian signatures, returning success or an error.
+///
+/// Parses and verifies internally. For callers that also need the parsed
+/// VAA, use [`parse_and_verify_vaa`] instead to avoid a double parse.
+pub fn verify_vaa(env: &Env, vaa_bytes: &Bytes) -> Result<(), WormholeError> {
+    parse_and_verify_vaa(env, vaa_bytes)?;
+    Ok(())
 }
 
 /// Parses VAA bytes into a structured `VAA` without signature verification.

@@ -80,6 +80,13 @@ impl WormholeCoreInterface for Wormhole {
         vaa::parse_vaa(&env, &vaa_bytes)
     }
 
+    fn parse_and_verify_vaa(
+        env: Env,
+        vaa_bytes: Bytes,
+    ) -> Result<wormhole_soroban_client::VAA, WormholeError> {
+        vaa::parse_and_verify_vaa(&env, &vaa_bytes)
+    }
+
     fn submit_contract_upgrade(env: Env, vaa_bytes: Bytes) -> Result<(), WormholeError> {
         ContractUpgradeAction::submit(&env, vaa_bytes)
     }
