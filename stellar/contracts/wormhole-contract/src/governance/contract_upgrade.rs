@@ -52,6 +52,10 @@ impl<'a> TryFrom<(&'a Env, &'a Bytes)> for ContractUpgradePayload {
         let (module, action, chain) = parse_governance_header(env, &mut reader)?;
         let new_contract_hash = reader.read_bytes_n::<32>()?;
 
+        if reader.remaining() != 0 {
+            return Err(WormholeError::InvalidPayload);
+        }
+
         Ok(ContractUpgradePayload {
             module,
             action,

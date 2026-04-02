@@ -53,6 +53,10 @@ impl<'a> TryFrom<(&'a Env, &'a Bytes)> for SetMessageFeePayload {
         reader.skip(U256_PADDING_BYTES)?;
         let fee = reader.read_u64_be()?;
 
+        if reader.remaining() != 0 {
+            return Err(WormholeError::InvalidPayload);
+        }
+
         Ok(SetMessageFeePayload {
             module,
             action,

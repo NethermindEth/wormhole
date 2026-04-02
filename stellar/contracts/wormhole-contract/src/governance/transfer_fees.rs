@@ -64,6 +64,10 @@ impl<'a> TryFrom<(&'a Env, &'a Bytes)> for TransferFeesPayload {
         let recipient_pk_bytes: BytesN<32> = reader.read_bytes_n::<32>()?;
         let recipient = address_from_ed25519_pk_bytes(env, &recipient_pk_bytes);
 
+        if reader.remaining() != 0 {
+            return Err(WormholeError::InvalidPayload);
+        }
+
         Ok(TransferFeesPayload {
             module,
             action,

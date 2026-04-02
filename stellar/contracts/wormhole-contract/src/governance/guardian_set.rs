@@ -68,6 +68,10 @@ impl<'a> TryFrom<(&'a Env, &'a Bytes)> for GuardianSetUpgradePayload {
             keys.push_back(BytesN::from_array(env, &key.to_array()));
         }
 
+        if reader.remaining() != 0 {
+            return Err(WormholeError::InvalidPayload);
+        }
+
         Ok(GuardianSetUpgradePayload {
             module,
             action,
