@@ -8,8 +8,8 @@ use crate::{storage::StorageKey, utils::keccak256_hash, vaa::verify_vaa_signatur
 use core::convert::TryFrom;
 use soroban_sdk::{Bytes, BytesN, Env};
 use wormhole_soroban_client::{
-    BytesReader, CHAIN_ID_STELLAR, GOVERNANCE_CHAIN_ID, GOVERNANCE_EMITTER, MODULE_CORE,
-    STORAGE_TTL_EXTENSION, STORAGE_TTL_THRESHOLD, VAA, WormholeError,
+    BytesReader, CHAIN_ID_STELLAR, GOVERNANCE_CHAIN_ID, GOVERNANCE_EMITTER, MODULE_CORE, VAA,
+    WormholeError,
 };
 
 /// Trait for implementing Wormhole governance actions.
@@ -96,16 +96,14 @@ fn require_vaa_not_consumed(env: &Env, hash: &BytesN<32>) -> Result<(), Wormhole
 }
 
 /// Marks a VAA as consumed to prevent replay attacks.
+///
+/// Uses persistent storage, which is archived (not deleted) on TTL expiry.
+/// An attacker replaying a VAA whose entry was archived must first restore
+/// it via `RestoreFootprint`, at which point the consumed flag blocks replay.
 fn consume_vaa(env: &Env, hash: &BytesN<32>) {
     env.storage()
         .persistent()
         .set(&StorageKey::ConsumedGovernanceVAA(hash.clone()), &true);
-
-    env.storage().persistent().extend_ttl(
-        &StorageKey::ConsumedGovernanceVAA(hash.clone()),
-        STORAGE_TTL_THRESHOLD,
-        STORAGE_TTL_EXTENSION,
-    );
 }
 
 /// Checks if a governance VAA has been consumed without full verification.
