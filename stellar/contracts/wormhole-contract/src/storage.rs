@@ -14,8 +14,6 @@ use soroban_sdk::{Address, BytesN, contracttype};
 pub enum StorageKey {
     /// Index of the currently active guardian set (starts at 0).
     CurrentGuardianSetIndex,
-    /// 32-byte address authorized to emit governance VAAs.
-    GovernanceEmitter,
     /// Guardian set data keyed by index; stores `GuardianSetInfo`.
     GuardianSet(u32),
     /// Unix timestamp when a guardian set expires (24h after replacement).

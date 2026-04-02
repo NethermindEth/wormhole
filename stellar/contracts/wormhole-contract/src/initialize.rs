@@ -1,15 +1,12 @@
 //! Contract initialization logic.
 //!
 //! Handles setup of the Wormhole Core contract via the `__constructor` function,
-//! including guardian set creation and governance emitter storage.
+//! including guardian set creation and governance emitter validation.
 //!
 //! This module is only called by the constructor, which is executed atomically
 //! during deployment (Protocol 22+). The runtime guarantees single execution.
 
-use crate::{
-    governance::guardian_set::{set_current_index, store},
-    storage::StorageKey,
-};
+use crate::governance::guardian_set::{set_current_index, store};
 use soroban_sdk::{BytesN, Env, Vec, contractevent};
 use wormhole_soroban_client::*;
 
@@ -30,8 +27,8 @@ struct InitializeEvent {
 
 /// Internal initialization logic called by `__constructor`.
 ///
-/// Sets up the initial guardian set (index 0) and stores the governance emitter
-/// address.
+/// Sets up the initial guardian set (index 0) and validates the governance
+/// emitter against the protocol constant.
 ///
 /// # Arguments
 /// * `initial_guardians` - Ethereum addresses (20 bytes) of initial guardians
@@ -49,17 +46,10 @@ pub(crate) fn initialize_internal(
         env.panic_with_error(WormholeError::EmptyGuardianSet);
     }
 
-    // Store governance emitter address
-    env.storage()
-        .persistent()
-        .set(&StorageKey::GovernanceEmitter, &governance_emitter);
-
-    // Extend TTL for governance emitter (it's permanent config)
-    env.storage().persistent().extend_ttl(
-        &StorageKey::GovernanceEmitter,
-        STORAGE_TTL_THRESHOLD,
-        STORAGE_TTL_EXTENSION,
-    );
+    // Reject deployment with wrong governance emitter
+    if governance_emitter.to_array() != GOVERNANCE_EMITTER {
+        env.panic_with_error(WormholeError::InvalidGovernanceEmitter);
+    }
 
     // Create the initial guardian set (always index 0)
     let guardian_set = GuardianSetInfo {

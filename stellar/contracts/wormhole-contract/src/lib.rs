@@ -22,7 +22,7 @@ use crate::governance::{
 };
 use soroban_sdk::{Address, Bytes, BytesN, Env, Vec, contract, contractimpl};
 use wormhole_soroban_client::{
-    CHAIN_ID_STELLAR, ConsistencyLevel, GOVERNANCE_CHAIN_ID, GuardianSetInfo,
+    CHAIN_ID_STELLAR, ConsistencyLevel, GOVERNANCE_CHAIN_ID, GOVERNANCE_EMITTER, GuardianSetInfo,
     WormholeCoreInterface, WormholeError,
 };
 
@@ -155,10 +155,6 @@ impl WormholeCoreInterface for Wormhole {
     }
 
     fn get_governance_emitter(env: Env) -> BytesN<32> {
-        // Constructor guarantees this is always set
-        env.storage()
-            .persistent()
-            .get(&storage::StorageKey::GovernanceEmitter)
-            .expect("governance emitter not set")
+        BytesN::from_array(&env, &GOVERNANCE_EMITTER)
     }
 }
