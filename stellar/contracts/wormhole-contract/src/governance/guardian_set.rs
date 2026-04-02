@@ -117,6 +117,12 @@ pub fn set_current_index(env: &Env, index: u32) {
     env.storage()
         .persistent()
         .set(&StorageKey::CurrentGuardianSetIndex, &index);
+
+    env.storage().persistent().extend_ttl(
+        &StorageKey::CurrentGuardianSetIndex,
+        STORAGE_TTL_THRESHOLD,
+        STORAGE_TTL_EXTENSION,
+    );
 }
 
 /// Retrieves a guardian set by index.
