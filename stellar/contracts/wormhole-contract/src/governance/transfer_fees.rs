@@ -1,8 +1,6 @@
 //! Transfer fees governance action (`ACTION_TRANSFER_FEES`, value 4).
 //!
 //! Allows guardians to withdraw accumulated message fees from the contract.
-//! Validates that sufficient balance remains (≥1 XLM) to prevent Stellar
-//! account deallocation.
 
 use crate::{
     governance::action::{GovernanceAction, parse_governance_header, validate_governance_header},
@@ -12,7 +10,7 @@ use crate::{
 use core::convert::TryFrom;
 use soroban_sdk::{Address, Bytes, BytesN, Env, contractevent, token};
 use wormhole_soroban_client::{
-    ACTION_TRANSFER_FEES, BytesReader, MINIMUM_CONTRACT_BALANCE, STORAGE_TTL_EXTENSION,
+    ACTION_TRANSFER_FEES, BytesReader, STORAGE_TTL_EXTENSION,
     STORAGE_TTL_THRESHOLD, TRANSFER_FEES_PAYLOAD_MIN_LENGTH, U256_PADDING_BYTES, VAA,
     WormholeError,
 };
@@ -88,11 +86,6 @@ impl TransferFeesPayload {
         let current_balance = u64::try_from(token_client.balance(&contract_address)).unwrap_or(0);
 
         if self.amount > current_balance {
-            return Err(WormholeError::InsufficientFees);
-        }
-
-        let remaining_balance = current_balance.saturating_sub(self.amount);
-        if remaining_balance < MINIMUM_CONTRACT_BALANCE {
             return Err(WormholeError::InsufficientFees);
         }
 
