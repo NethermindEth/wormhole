@@ -4,7 +4,7 @@
 //! providing a standard flow: verify VAA → check replay → parse payload →
 //! validate → consume → execute.
 
-use crate::{storage::StorageKey, utils::keccak256_hash, vaa::verify_vaa};
+use crate::{storage::StorageKey, utils::keccak256_hash, vaa::verify_vaa_signatures};
 use core::convert::TryFrom;
 use soroban_sdk::{Bytes, BytesN, Env};
 use wormhole_soroban_client::{
@@ -72,7 +72,7 @@ fn verify_and_hash_governance_vaa(
 ) -> Result<(VAA, BytesN<32>), WormholeError> {
     let vaa = VAA::try_from((env, vaa_bytes))?;
     verify_governance_vaa(&vaa)?;
-    verify_vaa(env, vaa_bytes)?;
+    verify_vaa_signatures(&vaa, env)?;
 
     let body_bytes = vaa.serialize_body(env);
     let vaa_hash = keccak256_hash(env, &body_bytes);
