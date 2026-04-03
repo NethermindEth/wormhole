@@ -147,12 +147,12 @@ pub fn parse_vaa(env: &Env, vaa_bytes: &Bytes) -> Result<VAA, WormholeError> {
 mod tests {
     use super::*;
     use soroban_sdk::{testutils::Ledger, vec};
-    use wormhole_soroban_client::ConsistencyLevel;
+    use wormhole_soroban_client::{ConsistencyLevel, GOVERNANCE_EMITTER};
 
     fn deploy_initialized(env: &Env) -> (soroban_sdk::Address, crate::WormholeClient<'_>) {
         let guardian = BytesN::<20>::from_array(env, &[0u8; 20]);
         let initial_guardians = vec![env, guardian];
-        let governance_emitter = BytesN::<32>::from_array(env, &[1u8; 32]);
+        let governance_emitter = BytesN::<32>::from_array(env, &GOVERNANCE_EMITTER);
         let contract_id = env.register(crate::Wormhole, (initial_guardians, governance_emitter));
         let client = crate::WormholeClient::new(env, &contract_id);
         (contract_id, client)
@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn test_verify_vaa_insufficient_sigs() {
         let env = Env::default();
-        let governance_emitter = BytesN::<32>::from_array(&env, &[9u8; 32]);
+        let governance_emitter = BytesN::<32>::from_array(&env, &GOVERNANCE_EMITTER);
 
         let g0 = BytesN::<20>::from_array(&env, &[0u8; 20]);
         let g1 = BytesN::<20>::from_array(&env, &[1u8; 20]);
@@ -407,7 +407,7 @@ mod tests {
         let env = Env::default();
         let stored_guardian = BytesN::<20>::from_array(&env, &[0x11u8; 20]);
         let initial_guardians = soroban_sdk::vec![&env, stored_guardian];
-        let governance_emitter = BytesN::<32>::from_array(&env, &[0x22u8; 32]);
+        let governance_emitter = BytesN::<32>::from_array(&env, &GOVERNANCE_EMITTER);
         let contract_id = env.register(crate::Wormhole, (initial_guardians, governance_emitter));
 
         let base_vaa = VAA {
@@ -474,7 +474,7 @@ mod tests {
         vaa.signatures = sigs;
 
         let initial_guardians = soroban_sdk::vec![&env, valid_eth_address];
-        let governance_emitter = BytesN::<32>::from_array(&env, &[0x22u8; 32]);
+        let governance_emitter = BytesN::<32>::from_array(&env, &GOVERNANCE_EMITTER);
         let contract_id = env.register(crate::Wormhole, (initial_guardians, governance_emitter));
 
         env.as_contract(&contract_id, || {
@@ -540,7 +540,7 @@ mod tests {
         let base_vaa = base_vaa_with_guardian_set(&env, 0);
         let (sig, guardian_eth) = sign_for_vaa(&env, &base_vaa, [0x77u8; 32], 1);
         let initial_guardians = soroban_sdk::vec![&env, guardian_eth.clone(), guardian_eth];
-        let governance_emitter = BytesN::<32>::from_array(&env, &[0x22u8; 32]);
+        let governance_emitter = BytesN::<32>::from_array(&env, &GOVERNANCE_EMITTER);
         let contract_id = env.register(crate::Wormhole, (initial_guardians, governance_emitter));
 
         let mut vaa = base_vaa.clone();

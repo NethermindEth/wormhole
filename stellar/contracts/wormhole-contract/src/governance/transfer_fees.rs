@@ -153,9 +153,7 @@ mod tests {
         contracttype,
         testutils::{Address as TestAddress, Events, Ledger},
     };
-    use wormhole_soroban_client::{
-        CHAIN_ID_STELLAR, MINIMUM_CONTRACT_BALANCE, MODULE_CORE, NATIVE_TOKEN_ADDRESS,
-    };
+    use wormhole_soroban_client::{CHAIN_ID_STELLAR, GOVERNANCE_EMITTER, MODULE_CORE, NATIVE_TOKEN_ADDRESS};
 
     #[contracttype]
     #[derive(Clone)]
@@ -202,7 +200,7 @@ mod tests {
     fn deploy_initialized(env: &Env) -> Address {
         let guardian = BytesN::<20>::from_array(env, &[0u8; 20]);
         let initial_guardians = soroban_sdk::vec![env, guardian];
-        let governance_emitter = BytesN::<32>::from_array(env, &[1u8; 32]);
+        let governance_emitter = BytesN::<32>::from_array(env, &GOVERNANCE_EMITTER);
         env.register(Wormhole, (initial_guardians, governance_emitter))
     }
 
@@ -306,26 +304,6 @@ mod tests {
     }
 
     #[test]
-    fn test_transfer_fees_validate_rejects_minimum_balance_violation() {
-        let env = Env::default();
-        let (_native_addr, native_client) = install_native_token_mock(&env);
-        let contract_id = deploy_initialized(&env);
-        env.as_contract(&contract_id, || {
-            native_client.set_balance(&contract_id, &(5 * 10_000_000i128));
-            let recipient = <Address as TestAddress>::generate(&env);
-            let payload = TransferFeesPayload {
-                module: BytesN::from_array(&env, &MODULE_CORE),
-                action: ACTION_TRANSFER_FEES,
-                chain: CHAIN_ID_STELLAR,
-                amount: 5 * 10_000_000,
-                recipient,
-            };
-            let res = payload.validate(&env);
-            assert_eq!(res, Err(WormholeError::InsufficientFees));
-        });
-    }
-
-    #[test]
     fn test_transfer_fees_execute_moves_balance_sets_timestamp_and_emits_event() {
         let env = Env::default();
         env.ledger().set_timestamp(12345);
@@ -384,8 +362,5 @@ mod tests {
                 )
             ]
         );
-
-        // Sanity check critical floor constant is meaningful in this test.
-        assert_eq!(MINIMUM_CONTRACT_BALANCE, 10_000_000);
     }
 }

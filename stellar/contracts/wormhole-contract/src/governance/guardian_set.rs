@@ -238,7 +238,7 @@ mod tests {
     fn deploy_initialized(env: &Env) -> soroban_sdk::Address {
         let guardian = BytesN::<20>::from_array(env, &[0u8; 20]);
         let initial_guardians = vec![env, guardian];
-        let governance_emitter = BytesN::<32>::from_array(env, &[1u8; 32]);
+        let governance_emitter = BytesN::<32>::from_array(env, &GOVERNANCE_EMITTER);
         env.register(Wormhole, (initial_guardians, governance_emitter))
     }
 
@@ -470,7 +470,7 @@ mod tests {
             Wormhole,
             (
                 vec![&env, guardian_eth],
-                BytesN::<32>::from_array(&env, &[1u8; 32]),
+                BytesN::<32>::from_array(&env, &GOVERNANCE_EMITTER),
             ),
         );
         let vaa_bytes = serialize_vaa(&env, &signed);

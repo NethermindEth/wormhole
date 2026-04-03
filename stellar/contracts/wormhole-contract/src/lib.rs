@@ -178,7 +178,7 @@ mod tests {
     fn deploy_initialized(env: &Env) -> (Address, WormholeClient<'_>) {
         let guardian = BytesN::<20>::from_array(env, &[0u8; 20]);
         let initial_guardians = vec![env, guardian];
-        let governance_emitter = BytesN::<32>::from_array(env, &[1u8; 32]);
+        let governance_emitter = BytesN::<32>::from_array(env, &GOVERNANCE_EMITTER);
         let contract_id = env.register(Wormhole, (initial_guardians, governance_emitter));
         let client = WormholeClient::new(env, &contract_id);
         (contract_id, client)
@@ -220,14 +220,11 @@ mod tests {
     }
 
     #[test]
-    fn test_get_governance_emitter_roundtrip() {
+    fn test_get_governance_emitter_returns_const() {
         let env = Env::default();
-        let guardian = BytesN::<20>::from_array(&env, &[0u8; 20]);
-        let initial_guardians = vec![&env, guardian];
-        let governance_emitter = BytesN::<32>::from_array(&env, &[9u8; 32]);
-        let contract_id = env.register(Wormhole, (initial_guardians, governance_emitter.clone()));
-        let client = WormholeClient::new(&env, &contract_id);
-        assert_eq!(client.get_governance_emitter(), governance_emitter);
+        let (_contract_id, client) = deploy_initialized(&env);
+        let expected = BytesN::<32>::from_array(&env, &GOVERNANCE_EMITTER);
+        assert_eq!(client.get_governance_emitter(), expected);
     }
 
     #[test]

@@ -184,7 +184,7 @@ mod tests {
             Wormhole,
             (
                 vec![&env, BytesN::<20>::from_array(&env, &[0u8; 20])],
-                BytesN::<32>::from_array(&env, &[1u8; 32]),
+                BytesN::<32>::from_array(&env, &wormhole_soroban_client::GOVERNANCE_EMITTER),
             ),
         );
 
