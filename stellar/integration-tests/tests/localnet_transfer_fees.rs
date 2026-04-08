@@ -125,18 +125,6 @@ fn integration_transfer_fees_flow() {
     );
     println!("Balances verified successfully.");
 
-    // Verify get_last_fee_transfer and event
-    let last_transfer_out = ctx.invoke(
-        &ctx.admin_identity,
-        &contract_id,
-        "get_last_fee_transfer",
-        &[],
-    );
-    assert!(
-        !last_transfer_out.contains("void") && !last_transfer_out.trim().is_empty(),
-        "Last fee transfer should have a timestamp"
-    );
-
     println!("Verifying event via RPC...");
     let found_event = find_event(
         &ctx.rpc_url,

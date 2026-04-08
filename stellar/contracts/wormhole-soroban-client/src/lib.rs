@@ -235,12 +235,6 @@ pub trait WormholeCoreInterface {
     /// Message fee in stroops
     fn get_message_fee(env: Env) -> u64;
 
-    /// Get the timestamp of the last fee transfer.
-    ///
-    /// # Returns
-    /// Timestamp of last transfer, or None if never transferred
-    fn get_last_fee_transfer(env: Env) -> Option<u64>;
-
     /// Get the contract's current XLM balance.
     ///
     /// # Returns

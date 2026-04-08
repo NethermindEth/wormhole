@@ -24,8 +24,6 @@ pub enum StorageKey {
     ConsumedGovernanceVAA(BytesN<32>),
     /// Fee charged per message in stroops (10^-7 XLM).
     MessageFee,
-    /// Timestamp of the most recent fee transfer (audit trail).
-    LastFeeTransfer,
     /// Next sequence number for each emitter address.
     EmitterSequence(Address),
 }

@@ -135,10 +135,6 @@ impl WormholeCoreInterface for Wormhole {
         governance::get_message_fee(&env)
     }
 
-    fn get_last_fee_transfer(env: Env) -> Option<u64> {
-        governance::get_last_fee_transfer(&env)
-    }
-
     fn get_contract_balance(env: Env) -> i128 {
         let native_token_address = utils::get_native_token_address(&env);
         let token_client = soroban_sdk::token::TokenClient::new(&env, &native_token_address);
@@ -283,10 +279,9 @@ mod tests {
     }
 
     #[test]
-    fn test_get_last_fee_transfer_default_none_and_guardian_expiry_none() {
+    fn test_guardian_set_expiry_default_none() {
         let env = Env::default();
         let (_contract_id, client) = deploy_initialized(&env);
-        assert_eq!(client.get_last_fee_transfer(), None);
         assert_eq!(client.get_guardian_set_expiry(&0), None);
     }
 }
