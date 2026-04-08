@@ -235,12 +235,6 @@ pub trait WormholeCoreInterface {
     /// Message fee in stroops
     fn get_message_fee(env: Env) -> u64;
 
-    /// Get the contract's current XLM balance.
-    ///
-    /// # Returns
-    /// Balance in stroops
-    fn get_contract_balance(env: Env) -> i128;
-
     /// Check if a governance VAA has been consumed (replay protection).
     ///
     /// # Arguments

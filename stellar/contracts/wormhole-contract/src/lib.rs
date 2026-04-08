@@ -135,12 +135,6 @@ impl WormholeCoreInterface for Wormhole {
         governance::get_message_fee(&env)
     }
 
-    fn get_contract_balance(env: Env) -> i128 {
-        let native_token_address = utils::get_native_token_address(&env);
-        let token_client = soroban_sdk::token::TokenClient::new(&env, &native_token_address);
-        token_client.balance(&env.current_contract_address())
-    }
-
     fn is_governance_vaa_consumed(env: Env, vaa_bytes: Bytes) -> Result<bool, WormholeError> {
         governance::is_governance_vaa_consumed(env, vaa_bytes)
     }
