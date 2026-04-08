@@ -131,10 +131,6 @@ impl WormholeCoreInterface for Wormhole {
         message::get_emitter_sequence(&env, &emitter)
     }
 
-    fn get_posted_message_hash(env: Env, emitter: Address, sequence: u64) -> Option<BytesN<32>> {
-        message::get_posted_message_hash(&env, &emitter, sequence)
-    }
-
     fn get_message_fee(env: Env) -> u64 {
         governance::get_message_fee(&env)
     }

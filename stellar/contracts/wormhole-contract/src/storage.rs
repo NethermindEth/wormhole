@@ -28,6 +28,4 @@ pub enum StorageKey {
     LastFeeTransfer,
     /// Next sequence number for each emitter address.
     EmitterSequence(Address),
-    /// Hash of posted message keyed by (emitter, sequence).
-    PostedMessage(Address, u64),
 }

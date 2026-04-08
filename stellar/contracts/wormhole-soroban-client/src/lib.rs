@@ -229,16 +229,6 @@ pub trait WormholeCoreInterface {
     /// Next sequence number for the emitter
     fn get_emitter_sequence(env: Env, emitter: Address) -> u64;
 
-    /// Get the hash of a posted message by emitter and sequence number.
-    ///
-    /// # Arguments
-    /// * `emitter` - Emitter address
-    /// * `sequence` - Message sequence number
-    ///
-    /// # Returns
-    /// Message hash, or None if not found
-    fn get_posted_message_hash(env: Env, emitter: Address, sequence: u64) -> Option<BytesN<32>>;
-
     /// Get the current message fee in stroops (10^-7 XLM).
     ///
     /// # Returns
