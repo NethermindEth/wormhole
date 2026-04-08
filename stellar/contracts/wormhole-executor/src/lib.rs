@@ -1,24 +1,16 @@
 #![no_std]
 
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, String, contract, contracterror, contractevent, contractimpl,
-    contracttype, token,
+    Address, Bytes, BytesN, Env, String, contract, contractevent, contractimpl, contracttype, token,
 };
-use wormhole_soroban_client::NATIVE_TOKEN_ADDRESS;
+use wormhole_soroban_client::{
+    ExecutorError, ExecutorInterface, NATIVE_TOKEN_ADDRESS, SignedQuote,
+};
 
 #[cfg(test)]
 mod tests;
 
 const EXECUTOR_VERSION: &str = "Executor-0.0.1";
-
-#[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum ExecError {
-    QuoteExpired = 11,
-    QuoteSrcChainMismatch = 12,
-    QuoteDstChainMismatch = 13,
-    InvalidAmount = 14,
-}
 
 #[contracttype]
 #[derive(Clone)]
@@ -41,37 +33,6 @@ pub struct RequestForExecution {
 
 fn get_native_token_address(env: &Env) -> Address {
     Address::from_string(&String::from_str(env, NATIVE_TOKEN_ADDRESS))
-}
-
-#[contracttype]
-#[derive(Clone)]
-pub struct SignedQuote {
-    pub prefix: BytesN<4>,
-    pub quoter: Address,
-    pub payee: Address,
-    pub src_chain: u32,
-    pub dst_chain: u32,
-    pub expiry: u64,
-}
-
-pub trait ExecutorTrait {
-    fn __constructor(env: Env, chain_id: u32);
-
-    fn chain_id(env: Env) -> u32;
-    fn executor_version(env: Env) -> String;
-
-    #[allow(clippy::too_many_arguments)]
-    fn request_execution(
-        env: Env,
-        dst_chain: u32,
-        dst_addr_wa32: BytesN<32>,
-        refund: Address,
-        payer: Address,
-        amount: i128,
-        signed_quote: SignedQuote,
-        request: Bytes,
-        relay_instructions: Bytes,
-    ) -> Result<(), ExecError>;
 }
 
 #[contract]
