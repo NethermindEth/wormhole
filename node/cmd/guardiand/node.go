@@ -222,6 +222,12 @@ var (
 	creditCoinRPC      *string
 	creditCoinContract *string
 
+	mocaRPC      *string
+	mocaContract *string
+
+	megaEthRPC      *string
+	megaEthContract *string
+
 	sepoliaRPC      *string
 	sepoliaContract *string
 
@@ -242,6 +248,9 @@ var (
 
 	polygonSepoliaRPC      *string
 	polygonSepoliaContract *string
+
+	monadTestnetRPC      *string
+	monadTestnetContract *string
 
 	logLevel                *string
 	publicRpcLogDetailStr   *string
@@ -482,6 +491,12 @@ func init() {
 	creditCoinRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "creditCoinRPC", "CREDITCOIN RPC_URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
 	creditCoinContract = NodeCmd.Flags().String("creditCoinContract", "", "CreditCoin contract address")
 
+	mocaRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "mocaRPC", "Moca RPC_URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
+	mocaContract = NodeCmd.Flags().String("mocaContract", "", "Moca contract address")
+
+	megaEthRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "megaEthRPC", "MegaETH RPC_URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
+	megaEthContract = NodeCmd.Flags().String("megaEthContract", "", "MegaETH contract address")
+
 	arbitrumSepoliaRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "arbitrumSepoliaRPC", "Arbitrum on Sepolia RPC URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
 	arbitrumSepoliaContract = NodeCmd.Flags().String("arbitrumSepoliaContract", "", "Arbitrum on Sepolia contract address")
 
@@ -493,6 +508,9 @@ func init() {
 
 	polygonSepoliaRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "polygonSepoliaRPC", "Polygon on Sepolia RPC URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
 	polygonSepoliaContract = NodeCmd.Flags().String("polygonSepoliaContract", "", "Polygon on Sepolia contract address")
+
+	monadTestnetRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "monadTestnetRPC", "Monad testnet RPC URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
+	monadTestnetContract = NodeCmd.Flags().String("monadTestnetContract", "", "Monad testnet contract address")
 
 	logLevel = NodeCmd.Flags().String("logLevel", "info", "Logging level (debug, info, warn, error, dpanic, panic, fatal)")
 	publicRpcLogDetailStr = NodeCmd.Flags().String("publicRpcLogDetail", "full", "The detail with which public RPC requests shall be logged (none=no logging, minimal=only log gRPC methods, full=log gRPC method, payload (up to 200 bytes) and user agent (up to 200 bytes))")
@@ -883,6 +901,8 @@ func runNode(cmd *cobra.Command, args []string) {
 	*xrplEvmContract = checkEvmArgs(logger, *xrplEvmRPC, *xrplEvmContract, vaa.ChainIDXRPLEVM)
 	*plasmaContract = checkEvmArgs(logger, *plasmaRPC, *plasmaContract, vaa.ChainIDPlasma)
 	*creditCoinContract = checkEvmArgs(logger, *creditCoinRPC, *creditCoinContract, vaa.ChainIDCreditCoin)
+	*mocaContract = checkEvmArgs(logger, *mocaRPC, *mocaContract, vaa.ChainIDMoca)
+	*megaEthContract = checkEvmArgs(logger, *megaEthRPC, *megaEthContract, vaa.ChainIDMegaETH)
 
 	// These chains will only ever be testnet / devnet.
 	*sepoliaContract = checkEvmArgs(logger, *sepoliaRPC, *sepoliaContract, vaa.ChainIDSepolia)
@@ -891,6 +911,7 @@ func runNode(cmd *cobra.Command, args []string) {
 	*optimismSepoliaContract = checkEvmArgs(logger, *optimismSepoliaRPC, *optimismSepoliaContract, vaa.ChainIDOptimismSepolia)
 	*holeskyContract = checkEvmArgs(logger, *holeskyRPC, *holeskyContract, vaa.ChainIDHolesky)
 	*polygonSepoliaContract = checkEvmArgs(logger, *polygonSepoliaRPC, *polygonSepoliaContract, vaa.ChainIDPolygonSepolia)
+	*monadTestnetContract = checkEvmArgs(logger, *monadTestnetRPC, *monadTestnetContract, vaa.ChainIDMonadTestnet)
 
 	if !argsConsistent([]string{*solanaContract, *solanaRPC}) {
 		logger.Fatal("Both --solanaContract and --solanaRPC must be set or both unset")
@@ -1083,7 +1104,11 @@ func runNode(cmd *cobra.Command, args []string) {
 		rpcMap["optimismSepoliaRPC"] = *optimismSepoliaRPC
 		rpcMap["holeskyRPC"] = *holeskyRPC
 		rpcMap["polygonSepoliaRPC"] = *polygonSepoliaRPC
+		rpcMap["monadTestnetRPC"] = *monadTestnetRPC
 	}
+
+	// Special or bespoke chains is in the 60000+ range.
+	// ChainIDHyperCore is not supported in the guardian.
 
 	// Other, non-chain specific parameters go here.
 	rpcMap["accountantWS"] = *accountantWS
@@ -1610,6 +1635,28 @@ func runNode(cmd *cobra.Command, args []string) {
 		watcherConfigs = append(watcherConfigs, wc)
 	}
 
+	if shouldStart(mocaRPC) {
+		wc := &evm.WatcherConfig{
+			NetworkID:        "moca",
+			ChainID:          vaa.ChainIDMoca,
+			Rpc:              *mocaRPC,
+			Contract:         *mocaContract,
+			CcqBackfillCache: *ccqBackfillCache,
+		}
+		watcherConfigs = append(watcherConfigs, wc)
+	}
+
+	if shouldStart(megaEthRPC) {
+		wc := &evm.WatcherConfig{
+			NetworkID:        "megaeth",
+			ChainID:          vaa.ChainIDMegaETH,
+			Rpc:              *megaEthRPC,
+			Contract:         *megaEthContract,
+			CcqBackfillCache: *ccqBackfillCache,
+		}
+		watcherConfigs = append(watcherConfigs, wc)
+	}
+
 	if shouldStart(terraWS) {
 		if env != common.UnsafeDevNet {
 			logger.Fatal("Terra classic is only allowed in unsafe dev mode")
@@ -1893,6 +1940,19 @@ func runNode(cmd *cobra.Command, args []string) {
 				Contract:          *polygonSepoliaContract,
 				CcqBackfillCache:  *ccqBackfillCache,
 				TxVerifierEnabled: slices.Contains(txVerifierChains, vaa.ChainIDPolygonSepolia),
+			}
+
+			watcherConfigs = append(watcherConfigs, wc)
+		}
+
+		if shouldStart(monadTestnetRPC) {
+			wc := &evm.WatcherConfig{
+				NetworkID:         "monad_testnet",
+				ChainID:           vaa.ChainIDMonadTestnet,
+				Rpc:               *monadTestnetRPC,
+				Contract:          *monadTestnetContract,
+				CcqBackfillCache:  *ccqBackfillCache,
+				TxVerifierEnabled: slices.Contains(txVerifierChains, vaa.ChainIDMonadTestnet),
 			}
 
 			watcherConfigs = append(watcherConfigs, wc)
