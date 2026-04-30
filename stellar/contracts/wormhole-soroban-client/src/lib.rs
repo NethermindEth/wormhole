@@ -293,7 +293,7 @@ pub trait WormholeCoreInterface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as TestAddress};
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     fn test_hash_address_uses_strkey_string_bytes() {
