@@ -1,0 +1,22 @@
+{
+  "name": "wormhole-vaa-generator",
+  "version": "1.0.0",
+  "description": "Generate test VAAs for Wormhole Core Contract testing",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "generate": "npm run build && node dist/index.js",
+    "clean": "rm -rf dist generated/*"
+  },
+  "keywords": ["wormhole", "vaa", "testing"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "@certusone/wormhole-sdk": "^0.10.0",
+    "ethers": "^5.7.2"
+  }
+}
