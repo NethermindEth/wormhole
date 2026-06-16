@@ -300,7 +300,7 @@ def build_node_yaml():
             if stellar:
                 container["command"] += [
                     "--stellarRPC",
-                    "http://stellar.default.svc.cluster.local:8000/soroban/rpc",
+                    "http://stellar:8000/soroban/rpc",
                     "--stellarContract",
                     "CBWQUIB4R65Z2DGC263FQ7BBI7TGIGOLFTYMLE6QPWBD5QDOUVJY3AKR",
                 ]
