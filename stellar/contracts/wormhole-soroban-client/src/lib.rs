@@ -275,14 +275,6 @@ pub trait WormholeCoreInterface {
     /// # Returns
     /// 32-byte governance emitter address
     fn get_governance_emitter(env: Env) -> BytesN<32>;
-
-    /// Record a Soroban address in the hash lookup table.
-    ///
-    /// Returns the canonical hash used as the lookup key.
-    fn record_address(env: Env, address: Address) -> Result<BytesN<32>, WormholeError>;
-
-    /// Resolve a previously recorded address hash.
-    fn get_address_from_hash(env: Env, hash: BytesN<32>) -> Result<Address, WormholeError>;
 }
 
 #[cfg(test)]
