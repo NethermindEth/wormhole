@@ -39,9 +39,18 @@ pub use types::*;
 
 use soroban_sdk::{Address, Bytes, BytesN, Env, contractclient};
 
-/// Computes the canonical Wormhole lookup hash for a Soroban address.
+/// Computes the canonical 32-byte Wormhole identity of a Soroban address.
 ///
-/// The hash input is the address StrKey string bytes.
+/// This is the canonical mapping from a Stellar `Address` (account `G…` or
+/// contract `C…`) onto Wormhole's fixed 32-byte wire format, shared by the core
+/// contract, NTT, and the off-chain SDK. Any reimplementation must produce
+/// identical bytes; the test vectors in this crate pin the exact mapping.
+///
+/// Definition: `keccak256` over the **StrKey text** — `address.to_string()`
+/// returns the canonical `G…`/`C…` string, and `.to_bytes()` is its raw ASCII
+/// with no length prefix and no trailing NUL. Hashing the StrKey (which carries
+/// the kind prefix + checksum) keeps accounts and contracts collision-free even
+/// when their underlying 32 bytes coincide.
 pub fn hash_address(env: &Env, address: &Address) -> BytesN<32> {
     env.crypto()
         .keccak256(&address.to_string().to_bytes())
@@ -280,7 +289,7 @@ pub trait WormholeCoreInterface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::{String, testutils::Address as _};
 
     #[test]
     fn test_hash_address_uses_strkey_string_bytes() {
@@ -292,5 +301,47 @@ mod tests {
             .to_bytes();
 
         assert_eq!(hash_address(&env, &address), expected);
+    }
+
+    fn assert_hash(strkey: &str, expected: [u8; 32]) {
+        let env = Env::default();
+        let address = Address::from_string(&String::from_str(&env, strkey));
+
+        // The hash input is the raw StrKey ASCII: no length prefix, no trailing NUL.
+        assert_eq!(
+            address.to_string().to_bytes(),
+            Bytes::from_slice(&env, strkey.as_bytes())
+        );
+        assert_eq!(
+            hash_address(&env, &address),
+            BytesN::from_array(&env, &expected)
+        );
+    }
+
+    // Fixed vectors pinning hash_address for an account and a contract StrKey.
+    // Expected values are keccak256 over the StrKey ASCII, computed independently;
+    // NTT and the off-chain SDK must produce identical bytes.
+    #[test]
+    fn test_hash_address_account_vector() {
+        assert_hash(
+            "GAIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCF6M",
+            [
+                0x27, 0x99, 0x72, 0xbd, 0x86, 0xb0, 0xe9, 0xcf, 0xf5, 0x3e, 0xd0, 0x68, 0xcc,
+                0x08, 0x9b, 0x96, 0x59, 0x64, 0x75, 0x48, 0x6a, 0x38, 0x2e, 0xe5, 0x62, 0x95,
+                0x76, 0xb3, 0x64, 0x12, 0x5d, 0x27,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_hash_address_contract_vector() {
+        assert_hash(
+            "CARCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEVQO",
+            [
+                0x79, 0xa0, 0x39, 0x9c, 0x82, 0x8a, 0xeb, 0x24, 0xb7, 0xf1, 0x70, 0x05, 0xd1,
+                0x29, 0xf4, 0xa2, 0x95, 0xb3, 0xa6, 0x68, 0x68, 0x74, 0xcb, 0x1b, 0xea, 0xe5,
+                0xc9, 0xc9, 0x5b, 0x95, 0xa9, 0x44,
+            ],
+        );
     }
 }
