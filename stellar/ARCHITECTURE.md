@@ -17,21 +17,17 @@ This contract enables Stellar (**Chain ID 61**) to participate in Wormhole's cro
 
 ## Contract Interface
 
-The contract implements `WormholeCoreInterface` with the following public functions:
+The contract is deployed with constructor arguments and implements `WormholeCoreInterface` with the following public functions:
 
 ### Initialization
 
 ```rust
-/// Initialize the contract with the initial guardian set.
-/// Can only be called once.
-fn initialize(
+/// Constructor called atomically during contract deployment.
+fn __constructor(
     env: Env,
     initial_guardians: Vec<BytesN<20>>,  // Ethereum addresses
     governance_emitter: BytesN<32>,       // Authorized governance source
-) -> Result<(), WormholeError>;
-
-/// Check if the contract has been initialized.
-fn is_initialized(env: Env) -> bool;
+);
 ```
 
 ### VAA Operations
@@ -42,6 +38,9 @@ fn verify_vaa(env: Env, vaa_bytes: Bytes) -> Result<(), WormholeError>;
 
 /// Parse VAA bytes into structured data (no signature verification).
 fn parse_vaa(env: Env, vaa_bytes: Bytes) -> Result<VAA, WormholeError>;
+
+/// Parse VAA bytes and verify signatures against the stored guardian set.
+fn parse_and_verify_vaa(env: Env, vaa_bytes: Bytes) -> Result<VAA, WormholeError>;
 ```
 
 ### Governance Actions
@@ -84,10 +83,12 @@ fn get_guardian_set(env: Env, index: u32) -> Result<GuardianSetInfo, WormholeErr
 fn get_guardian_set_expiry(env: Env, index: u32) -> Option<u64>;
 fn get_message_fee(env: Env) -> u64;
 fn get_emitter_sequence(env: Env, emitter: Address) -> u64;
-fn is_governance_vaa_consumed(env: Env, vaa_bytes: Bytes) -> Result<(), WormholeError>;
+fn is_governance_vaa_consumed(env: Env, vaa_bytes: Bytes) -> Result<bool, WormholeError>;
 fn get_chain_id() -> u32;
 fn get_governance_chain_id() -> u32;
 fn get_governance_emitter(env: Env) -> BytesN<32>;
+fn record_address(env: Env, address: Address) -> Result<BytesN<32>, WormholeError>;
+fn get_address_from_hash(env: Env, hash: BytesN<32>) -> Result<Address, WormholeError>;
 ```
 
 ## Core Types
@@ -98,7 +99,7 @@ The fundamental cross-chain message format:
 
 ```rust
 pub struct VAA {
-    pub version: u8,
+    pub version: u32,
     pub guardian_set_index: u32,
     pub signatures: Vec<Signature>,
     pub timestamp: u32,
@@ -106,9 +107,8 @@ pub struct VAA {
     pub emitter_chain: u32,
     pub emitter_address: BytesN<32>,
     pub sequence: u64,
-    pub consistency_level: u8,
+    pub consistency_level: ConsistencyLevel,
     pub payload: Bytes,
-    pub body_hash: BytesN<32>,
 }
 ```
 
@@ -136,9 +136,11 @@ Stores guardian set metadata on-chain:
 ```rust
 pub struct GuardianSetInfo {
     pub keys: Vec<BytesN<20>>,  // Ethereum addresses (20 bytes each)
-    pub expiration_time: u64,    // 0 if current set, timestamp if expired
+    pub creation_time: u64,      // Ledger timestamp when this set was activated
 }
 ```
+
+Guardian-set expiry is stored separately and exposed through `get_guardian_set_expiry`.
 
 ### Signature
 
@@ -146,10 +148,10 @@ Individual guardian signature:
 
 ```rust
 pub struct Signature {
-    pub guardian_index: u8,
+    pub guardian_index: u32,
     pub r: BytesN<32>,
     pub s: BytesN<32>,
-    pub v: u8,
+    pub v: u32,
 }
 ```
 
@@ -159,8 +161,8 @@ Finality requirements for message attestation:
 
 ```rust
 pub enum ConsistencyLevel {
-    Confirmed = 0,   // Faster, less secure
-    Finalized = 1,   // Slower, maximum security
+    Confirmed = 1,   // Standard confirmation
+    Finalized = 32,  // Full finality
 }
 ```
 
@@ -171,7 +173,7 @@ pub enum ConsistencyLevel {
 3. For each signature, recover secp256k1 public key
 4. Derive Ethereum address from public key
 5. Compare against guardian set keys
-6. Require 13-of-19 signatures (quorum)
+6. Require a two-thirds-plus-one quorum, e.g. 13 signatures for a 19-guardian set
 
 ## Governance Flow
 
@@ -216,8 +218,7 @@ Errors are categorized by range:
 | Range | Category | Examples |
 |-------|----------|----------|
 | 1-19 | VAA Errors | `InvalidVAAFormat`, `InvalidSignature`, `InsufficientSignatures` |
-| 20-29 | Initialization | `NotInitialized`, `AlreadyInitialized` |
 | 30-39 | Governance | `InvalidGovernanceChain`, `GovernanceVAAAlreadyConsumed` |
 | 40-49 | Storage | `GuardianSetNotFound`, `EmptyGuardianSet` |
-| 50-59 | Fees | `InsufficientFeePaid`, `InsufficientFunds` |
-| 60-69 | Parsing | `InvalidPayload`, `UnexpectedEndOfInput` |
+| 50-59 | Fees | `InsufficientFeePaid`, `InsufficientFees` |
+| 60+ | Message posting | `InvalidConsistencyLevel` |
