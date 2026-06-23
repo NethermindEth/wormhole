@@ -30,6 +30,8 @@ source "$ENV_FILE"
 : "${SOROBAN_RPC_URL:?SOROBAN_RPC_URL not set}"
 : "${WORMHOLE_WASM_PATH:?WORMHOLE_WASM_PATH not set}"
 
+STELLAR_RPC_URL="${STELLAR_RPC_URL:-$SOROBAN_RPC_URL}"
+
 if [[ "$WORMHOLE_WASM_PATH" != /* ]]; then
   # Resolve the configured wasm path relative to the workspace root.
   WORMHOLE_WASM_PATH="$PROJECT_ROOT/$WORMHOLE_WASM_PATH"
@@ -40,6 +42,8 @@ fi
 export STELLAR_NETWORK
 export STELLAR_IDENTITY
 export SOROBAN_RPC_URL
+export STELLAR_RPC_URL
+export STELLAR_NETWORK_PASSPHRASE
 export WORMHOLE_WASM_PATH
 
 echo "Building contracts using stellar contract build..."
@@ -64,4 +68,14 @@ cp target/wasm32v1-none/release/wormhole_contract_original.wasm target/wasm32v1-
 export WORMHOLE_UPGRADE_WASM_PATH="$PROJECT_ROOT/target/wasm32v1-none/release/wormhole_contract_upgrade.wasm"
 
 echo "Running integration tests..."
-cargo test -p integration-tests -- --ignored --nocapture
+cargo test -p integration-tests --test localnet_initialize_and_query -- --ignored --nocapture
+cargo test -p integration-tests --test localnet_post_message -- --ignored --nocapture
+cargo test -p integration-tests --test localnet_guardian_set_upgrade -- --ignored --nocapture
+cargo test -p integration-tests --test localnet_contract_upgrade -- --ignored --nocapture
+
+if [[ "${RUN_LOCALNET_FEE_TESTS:-}" == "1" ]]; then
+  cargo test -p integration-tests --test localnet_message_fee -- --ignored --nocapture
+  cargo test -p integration-tests --test localnet_transfer_fees -- --ignored --nocapture
+else
+  echo "Skipping native-token fee tests; set RUN_LOCALNET_FEE_TESTS=1 to run them."
+fi
