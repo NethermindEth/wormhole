@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
-  "contracts/wormhole-soroban-client"
+  "contracts/wormhole-soroban-client",
+  "contracts/wormhole-contract"
 ]
 
 [workspace.package]
