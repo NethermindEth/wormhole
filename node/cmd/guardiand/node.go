@@ -18,6 +18,7 @@ import (
 	"github.com/certusone/wormhole/node/pkg/guardiansigner"
 	"github.com/certusone/wormhole/node/pkg/watchers"
 	"github.com/certusone/wormhole/node/pkg/watchers/ibc"
+	"github.com/certusone/wormhole/node/pkg/watchers/stellar"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/certusone/wormhole/node/pkg/watchers/cosmwasm"
@@ -244,6 +245,9 @@ var (
 	holeskyRPC      *string
 	holeskyContract *string
 
+	stellarRPC      *string
+	stellarContract *string
+
 	arbitrumSepoliaRPC      *string
 	arbitrumSepoliaContract *string
 
@@ -435,6 +439,13 @@ func init() {
 
 	holeskyRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "holeskyRPC", "Holesky RPC URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
 	holeskyContract = NodeCmd.Flags().String("holeskyContract", "", "Holesky contract address")
+
+	stellarRPC = node.RegisterFlagWithValidationOrFail(
+		NodeCmd, "stellarRPC", "Stellar (Soroban) RPC URL", "http://stellar.default.svc.cluster.local:8000/soroban/rpc", []string{"http", "https"},
+	)
+	stellarContract = NodeCmd.Flags().String(
+		"stellarContract", "CBWQUIB4R65Z2DGC263FQ7BBI7TGIGOLFTYMLE6QPWBD5QDOUVJY3AKR", "Wormhole core contract ID on Stellar (e.g., StrKey for Soroban core contract)",
+	)
 
 	optimismRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "optimismRPC", "Optimism RPC URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
 	optimismContract = NodeCmd.Flags().String("optimismContract", "", "Optimism contract address")
@@ -998,6 +1009,10 @@ func runNode(cmd *cobra.Command, args []string) {
 		logger.Fatal("Either --gatewayContract, --gatewayWS and --gatewayLCD must all be set or all unset")
 	}
 
+	if !argsConsistent([]string{*stellarContract, *stellarRPC}) {
+		logger.Fatal("Either --stellarContract and --stellarRPC must both be set or both unset")
+	}
+
 	if !*chainGovernorEnabled && *coinGeckoApiKey != "" {
 		logger.Fatal("If coinGeckoApiKey is set, then chainGovernorEnabled must be set")
 	}
@@ -1066,6 +1081,7 @@ func runNode(cmd *cobra.Command, args []string) {
 	rpcMap["avalancheRPC"] = *avalancheRPC
 	rpcMap["algorandIndexerRPC"] = *algorandIndexerRPC
 	rpcMap["algorandAlgodRPC"] = *algorandAlgodRPC
+	rpcMap["stellarRPC"] = *stellarRPC
 	rpcMap["klaytnRPC"] = *klaytnRPC
 	rpcMap["celoRPC"] = *celoRPC
 	rpcMap["nearRPC"] = *nearRPC
@@ -1740,6 +1756,17 @@ func runNode(cmd *cobra.Command, args []string) {
 			ChainID:   vaa.ChainIDNear,
 			Rpc:       *nearRPC,
 			Contract:  *nearContract,
+		}
+		watcherConfigs = append(watcherConfigs, wc)
+	}
+
+	if shouldStart(stellarRPC) {
+		wc := &stellar.WatcherConfig{
+			NetworkID:   "61",
+			ChainID:     vaa.ChainIDStellar,
+			Rpc:         *stellarRPC,
+			Contract:    *stellarContract,
+			StartLedger: 0,
 		}
 		watcherConfigs = append(watcherConfigs, wc)
 	}
