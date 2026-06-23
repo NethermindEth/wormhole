@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploy script for Stellar Wormhole contract
-# Usage: deploy.sh <testnet|mainnet> [--skip-init] [--yes]
+# Usage: deploy.sh <testnet|mainnet> [--yes]
 
 set -euo pipefail
 
@@ -18,8 +18,6 @@ Arguments:
   testnet|mainnet    Target network for deployment
 
 Options:
-  --skip-init        Skip contract initialization (useful when deploying to an
-                     already-initialized contract or when config has no guardians)
   --yes              Skip confirmation prompt (required for mainnet deployments)
   -h, --help         Show this help message
 
@@ -39,14 +37,11 @@ Configuration:
   - friendbot_url: URL for funding testnet accounts (can be empty for mainnet)
   - governance_emitter: 32-byte hex address of the governance emitter
                         (standard is 0000...0004)
-  - guardians: Array of guardian addresses (can be empty if using --skip-init)
+  - guardians: Array of guardian addresses used by the contract constructor
 
 Examples:
   # Deploy to testnet
   $(basename "$0") testnet
-
-  # Deploy to testnet without initialization
-  $(basename "$0") testnet --skip-init
 
   # Deploy to mainnet (requires --yes flag)
   $(basename "$0") mainnet --yes
@@ -58,7 +53,7 @@ Output:
   - wasm_hash: Hash of the deployed WASM
   - deployer: Deployer account address
   - guardian_count: Number of guardians initialized
-  - initialized: Whether the contract was initialized
+  - initialized: Whether constructor initialization was performed
   - timestamp: Deployment timestamp (UTC)
 EOF
   exit 2
@@ -73,14 +68,16 @@ CONFIG_DIR="$SCRIPT_DIR/config"
 
 # Parse command-line arguments
 # NETWORK: first positional argument (testnet or mainnet)
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+fi
+
 NETWORK="${1:-}"; shift || true
-SKIP_INIT=false
 YES=false
 
 # Process remaining command-line flags
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --skip-init) SKIP_INIT=true ;;  # Skip contract initialization
     --yes) YES=true ;;              # Skip confirmation prompt (required for mainnet)
     -h|--help) usage ;;
     *) die "unknown option: $1" ;;
@@ -107,10 +104,8 @@ GOVERNANCE_EMITTER="$(yq -r '.governance_emitter' "$CONFIG_FILE")" # Governance 
 
 # Validate configuration
 [[ -n "$DEPLOYER" && "$DEPLOYER" != "null" ]] || die "config missing .deployer: $CONFIG_FILE"
-# Require governance_emitter unless --skip-init is used
-[[ "$SKIP_INIT" == "true" || ( -n "$GOVERNANCE_EMITTER" && "$GOVERNANCE_EMITTER" != "null" ) ]] || die "config missing .governance_emitter: $CONFIG_FILE"
-# Require guardians unless --skip-init is used
-[[ "$SKIP_INIT" == "true" || "$GUARDIAN_COUNT" -gt 0 ]] || die "config has no guardians (use --skip-init)"
+[[ -n "$GOVERNANCE_EMITTER" && "$GOVERNANCE_EMITTER" != "null" ]] || die "config missing .governance_emitter: $CONFIG_FILE"
+[[ "$GUARDIAN_COUNT" -gt 0 ]] || die "config has no guardians"
 # Require --yes flag for mainnet deployments
 [[ "$NETWORK" != "mainnet" || "$YES" == "true" ]] || die "mainnet requires --yes"
 
@@ -135,28 +130,28 @@ step "build"
 [[ -f "$CONTRACT_WASM" ]] || die "missing wasm: $CONTRACT_WASM"
 
 # Deploy the contract
-step "deploy ($NETWORK)"
-DEPLOY_OUTPUT="$(stellar contract deploy --wasm "$CONTRACT_WASM" --source-account "$DEPLOYER" --network "$NETWORK" 2>&1)"
+step "deploy and initialize ($NETWORK, $GUARDIAN_COUNT guardians)"
+DEPLOY_OUTPUT="$(stellar contract deploy \
+  --wasm "$CONTRACT_WASM" \
+  --source-account "$DEPLOYER" \
+  --network "$NETWORK" \
+  -- \
+  --initial_guardians "$GUARDIANS_JSON" \
+  --governance_emitter "$GOVERNANCE_EMITTER" 2>&1)"
 # Extract contract ID from deployment output (Stellar contract IDs are 56 chars starting with 'C')
 CONTRACT_ID="$(grep -Eo 'C[A-Z0-9]{55}' <<<"$DEPLOY_OUTPUT" | head -1 || true)"
 [[ -n "$CONTRACT_ID" ]] || { echo "$DEPLOY_OUTPUT" >&2; die "failed to parse contract id"; }
 # Extract WASM hash from deployment output (64 hex characters)
 WASM_HASH="$(grep -Eo '[a-f0-9]{64}' <<<"$DEPLOY_OUTPUT" | head -1 || true)"
 
-# Initialize the contract with guardians (unless --skip-init is used)
-if [[ "$SKIP_INIT" != "true" ]]; then
-  step "initialize ($GUARDIAN_COUNT guardians)"
-  stellar contract invoke --id "$CONTRACT_ID" --source-account "$DEPLOYER" --network "$NETWORK" -- \
-    initialize --initial_guardians "$GUARDIANS_JSON" --governance_emitter "\"$GOVERNANCE_EMITTER\"" >/dev/null
-  # Verify initialization succeeded by checking guardian set index is 0
-  [[ "$(stellar contract invoke --id "$CONTRACT_ID" --source-account "$DEPLOYER" --network "$NETWORK" -- \
-    get_current_guardian_set_index 2>/dev/null | grep -Eo '[0-9]+' | head -1)" == "0" ]] \
-    || die "init failed"
-fi
+# Verify constructor initialization succeeded by checking guardian set index is 0.
+[[ "$(stellar contract invoke --id "$CONTRACT_ID" --source-account "$DEPLOYER" --network "$NETWORK" -- \
+  get_current_guardian_set_index 2>/dev/null | grep -Eo '[0-9]+' | head -1)" == "0" ]] \
+  || die "constructor init failed"
 
 # Output deployment summary
 TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-INITIALIZED="$([[ "$SKIP_INIT" == "true" ]] && echo "no" || echo "yes")"
+INITIALIZED="yes"
 
 # Human-readable output to stderr (for display)
 {
@@ -178,4 +173,4 @@ INITIALIZED="$([[ "$SKIP_INIT" == "true" ]] && echo "no" || echo "yes")"
 # JSON output to stdout (for scripting)
 printf '{"network":"%s","contract_id":"%s","wasm_hash":"%s","deployer":"%s","guardian_count":%s,"initialized":%s,"timestamp":"%s"}\n' \
   "$NETWORK" "$CONTRACT_ID" "${WASM_HASH:-}" "$DEPLOYER_ADDR" "$GUARDIAN_COUNT" \
-  "$([[ "$SKIP_INIT" == "true" ]] && echo false || echo true)" "$TIMESTAMP"
+  true "$TIMESTAMP"
