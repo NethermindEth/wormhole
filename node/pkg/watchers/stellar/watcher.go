@@ -369,22 +369,24 @@ func (w *watcher) handleReobservationRequest(ctx context.Context, txHash, rpcURL
 			continue
 		}
 
-		mp := w.parseEventJSON(e, logger)
-		if mp == nil {
+		parsed := w.parseEventJSON(e, logger)
+		if parsed == nil {
 			continue
 		}
 
-		mp.TxID = txIDBytes
-		mp.Timestamp = timestamp
-		mp.EmitterChain = w.chainID
-		mp.IsReobservation = true
+		mp := &common.MessagePublication{
+			TxID:             txIDBytes,
+			Timestamp:        timestamp,
+			Nonce:            parsed.nonce,
+			Sequence:         parsed.sequence,
+			ConsistencyLevel: parsed.consistencyLevel,
+			EmitterChain:     w.chainID,
+			EmitterAddress:   parsed.emitterAddress,
+			Payload:          parsed.payload,
+			IsReobservation:  true,
+		}
 
-		logger.Info("reobserved stellar message",
-			zap.Uint64("ledger", ledger),
-			zap.String("tx", txHash),
-			zap.Uint64("seq", mp.Sequence),
-			zap.Uint8("consistency", mp.ConsistencyLevel),
-		)
+		logger.Info("reobserved stellar message", mp.ZapFields(zap.Uint64("ledger", ledger))...)
 
 		select {
 		case w.msgC <- mp:
@@ -511,8 +513,8 @@ func (w *watcher) pollOnce(ctx context.Context, logger *zap.Logger) (bool, error
 			ledger := e.Get("ledger").Uint()
 			txHash := e.Get("txHash").Str
 
-			mp := w.parseEventJSON(e, logger)
-			if mp == nil {
+			parsed := w.parseEventJSON(e, logger)
+			if parsed == nil {
 				continue
 			}
 
@@ -521,8 +523,6 @@ func (w *watcher) pollOnce(ctx context.Context, logger *zap.Logger) (bool, error
 				logger.Warn("failed to decode txHash", zap.String("txHash", txHash), zap.Error(err))
 				continue
 			}
-			mp.TxID = txIDBytes
-			mp.EmitterChain = w.chainID
 
 			// Use ledgerClosedAt from the event for a deterministic timestamp.
 			// All guardians observing the same event will use the same timestamp,
@@ -536,16 +536,21 @@ func (w *watcher) pollOnce(ctx context.Context, logger *zap.Logger) (bool, error
 				)
 				continue
 			}
-			mp.Timestamp = ts
+
+			mp := &common.MessagePublication{
+				TxID:             txIDBytes,
+				Timestamp:        ts,
+				Nonce:            parsed.nonce,
+				Sequence:         parsed.sequence,
+				ConsistencyLevel: parsed.consistencyLevel,
+				EmitterChain:     w.chainID,
+				EmitterAddress:   parsed.emitterAddress,
+				Payload:          parsed.payload,
+			}
 
 			stellarMessagesObserved.WithLabelValues(w.networkName).Inc()
 
-			logger.Info("stellar message published",
-				zap.Uint64("ledger", ledger),
-				zap.String("tx", txHash),
-				zap.Uint64("seq", mp.Sequence),
-				zap.Uint8("consistency", mp.ConsistencyLevel),
-			)
+			logger.Info("stellar message published", mp.ZapFields(zap.Uint64("ledger", ledger))...)
 
 			select {
 			case w.msgC <- mp:
@@ -574,9 +579,20 @@ func (w *watcher) pollOnce(ctx context.Context, logger *zap.Logger) (bool, error
 	return advanced, nil
 }
 
+// parsedMessage holds the message fields parsed from a message_published event value.
+// The caller combines these with the transaction context (TxID, timestamp, chain ID)
+// to build a complete MessagePublication.
+type parsedMessage struct {
+	nonce            uint32
+	sequence         uint64
+	consistencyLevel uint8
+	emitterAddress   vaa.Address
+	payload          []byte
+}
+
 // parseEventJSON checks the event topics for a message_published event and parses the event data.
 // Returns nil if the event is not a message_published event or cannot be parsed.
-func (w *watcher) parseEventJSON(e gjson.Result, logger *zap.Logger) *common.MessagePublication {
+func (w *watcher) parseEventJSON(e gjson.Result, logger *zap.Logger) *parsedMessage {
 	topics := e.Get("topic").Array()
 	if len(topics) < minEventTopicCount {
 		return nil
@@ -596,30 +612,29 @@ func (w *watcher) parseEventJSON(e gjson.Result, logger *zap.Logger) *common.Mes
 		return nil
 	}
 
-	return parseMessageFromXDR(valueBytes, logger)
+	parsed, err := w.parseMessageFromXDR(valueBytes)
+	if err != nil {
+		logger.Warn("failed to parse message_published event, skipping", zap.Error(err))
+		return nil
+	}
+	return parsed
 }
 
-// parseMessageFromXDR parses the XDR-encoded Soroban event value into a MessagePublication.
-func parseMessageFromXDR(data []byte, logger *zap.Logger) *common.MessagePublication {
+// parseMessageFromXDR parses the XDR-encoded Soroban event value into the published message fields.
+func (w *watcher) parseMessageFromXDR(data []byte) (*parsedMessage, error) {
 	var scVal stellarxdr.ScVal
 
-	_, err := stellarxdr.Unmarshal(bytes.NewReader(data), &scVal)
-	if err != nil {
-		logger.Debug("failed to unmarshal XDR", zap.Error(err))
-		return nil
+	if _, err := stellarxdr.Unmarshal(bytes.NewReader(data), &scVal); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal XDR: %w", err)
 	}
 
 	eventMap, ok := scVal.GetMap()
 	if !ok {
-		logger.Debug("event value is not a map")
-		return nil
+		return nil, fmt.Errorf("event value is not a map")
 	}
 
-	var nonce uint32
-	var sequence uint64
+	msg := &parsedMessage{}
 	var emitterAddress []byte
-	var payload []byte
-	var consistencyLevel uint32
 
 	for _, entry := range *eventMap {
 		keySymbol, ok := entry.Key.GetSym()
@@ -630,11 +645,11 @@ func parseMessageFromXDR(data []byte, logger *zap.Logger) *common.MessagePublica
 		switch string(keySymbol) {
 		case "nonce":
 			if val, ok := entry.Val.GetU32(); ok {
-				nonce = uint32(val)
+				msg.nonce = uint32(val)
 			}
 		case "sequence":
 			if val, ok := entry.Val.GetU64(); ok {
-				sequence = uint64(val)
+				msg.sequence = uint64(val)
 			}
 		case "emitter_address":
 			if val, ok := entry.Val.GetBytes(); ok {
@@ -642,37 +657,27 @@ func parseMessageFromXDR(data []byte, logger *zap.Logger) *common.MessagePublica
 			}
 		case "payload":
 			if val, ok := entry.Val.GetBytes(); ok {
-				payload = val
+				msg.payload = val
 			}
 		case "consistency_level":
 			if val, ok := entry.Val.GetU32(); ok {
-				consistencyLevel = uint32(val)
+				if val > math.MaxUint8 {
+					return nil, fmt.Errorf("consistency level %d overflows uint8", val)
+				}
+				msg.consistencyLevel = uint8(val)
 			}
 		}
 	}
 
 	if len(emitterAddress) == 0 {
-		logger.Warn("message_published event has empty emitter address, skipping")
-		return nil
+		return nil, fmt.Errorf("message_published event has empty emitter address")
 	}
 
-	var emitter vaa.Address
 	if len(emitterAddress) >= stellarAddressLen {
-		copy(emitter[:], emitterAddress[:stellarAddressLen])
+		copy(msg.emitterAddress[:], emitterAddress[:stellarAddressLen])
 	} else {
-		copy(emitter[:], emitterAddress)
+		copy(msg.emitterAddress[:], emitterAddress)
 	}
 
-	return &common.MessagePublication{
-		TxID:             nil,
-		Timestamp:        time.Time{},
-		Nonce:            nonce,
-		Sequence:         sequence,
-		ConsistencyLevel: uint8(consistencyLevel),
-		EmitterChain:     vaa.ChainIDUnset,
-		EmitterAddress:   emitter,
-		Payload:          payload,
-		IsReobservation:  false,
-		Unreliable:       false,
-	}
+	return msg, nil
 }

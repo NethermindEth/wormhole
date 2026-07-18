@@ -428,6 +428,42 @@ func TestPollOnce_SkipsEmptyEmitter(t *testing.T) {
 	}
 }
 
+func TestPollOnce_SkipsConsistencyLevelOverflow(t *testing.T) {
+	// An event whose consistency_level does not fit in uint8 must be dropped.
+	emitter := make([]byte, 32)
+	emitter[0] = 0x01
+
+	mock := newMockRPC(200)
+	mock.events = []mockEvent{
+		{
+			id:             "0000000100-0000000001",
+			ledger:         100,
+			ledgerClosedAt: "2024-01-01T00:00:00Z",
+			contractID:     testContract,
+			txHash:         fmt.Sprintf("%064x", 1),
+			topic0B64:      makeTopicB64(t, "wormhole"),
+			topic1B64:      makeTopicB64(t, "message_published"),
+			valueB64:       makeEventValueB64(t, 1, 1, emitter, []byte("pay"), 256),
+		},
+	}
+
+	srv := httptest.NewServer(mock)
+	defer srv.Close()
+
+	msgC := make(chan *common.MessagePublication, 10)
+	w := newTestWatcher(srv.URL, 128, msgC)
+
+	_, err := w.pollOnce(context.Background(), zap.NewNop())
+	require.NoError(t, err)
+
+	select {
+	case mp := <-msgC:
+		t.Fatalf("expected no message but got seq=%d", mp.Sequence)
+	case <-time.After(50 * time.Millisecond):
+		// correct: nothing published
+	}
+}
+
 func TestPollOnce_NoEventsAdvancesNextLedger(t *testing.T) {
 	// When getEvents returns no events, nextLedger must advance to latestLedger
 	// from the getEvents response. No separate getLatestLedger call should be made.
