@@ -147,7 +147,7 @@ pub fn parse_vaa(env: &Env, vaa_bytes: &Bytes) -> Result<VAA, WormholeError> {
 mod tests {
     use super::*;
     use soroban_sdk::{testutils::Ledger, vec};
-    use wormhole_soroban_client::{ConsistencyLevel, GOVERNANCE_EMITTER};
+    use wormhole_soroban_client::GOVERNANCE_EMITTER;
 
     fn deploy_initialized(env: &Env) -> (soroban_sdk::Address, crate::WormholeClient<'_>) {
         let guardian = BytesN::<20>::from_array(env, &[0u8; 20]);
@@ -229,7 +229,7 @@ mod tests {
             0x1C, 0x1D, 0x1E, 0x1F,
         ];
         let sequence: u64 = 0x0102030405060708;
-        let consistency_level_u8: u8 = ConsistencyLevel::Confirmed as u8;
+        let consistency_level_u8: u8 = 1;
         let payload: [u8; 2] = [0xAA, 0xBB];
 
         let mut raw = Bytes::new(&env);
@@ -335,10 +335,7 @@ mod tests {
             &env,
             &0x0102030405060708u64.to_be_bytes(),
         )); // sequence
-        raw.append(&Bytes::from_slice(
-            &env,
-            &[ConsistencyLevel::Confirmed as u8],
-        ));
+        raw.append(&Bytes::from_slice(&env, &[1])); // consistency_level
         raw.append(&Bytes::from_slice(&env, &[0xAAu8, 0xBBu8, 0xCCu8])); // payload
 
         let body = VAA::get_body_bytes(&raw).expect("expected valid body bytes");
@@ -352,10 +349,7 @@ mod tests {
             &env,
             &0x0102030405060708u64.to_be_bytes(),
         )); // sequence
-        expected_body.append(&Bytes::from_slice(
-            &env,
-            &[ConsistencyLevel::Confirmed as u8],
-        ));
+        expected_body.append(&Bytes::from_slice(&env, &[1])); // consistency_level
         expected_body.append(&Bytes::from_slice(&env, &[0xAAu8, 0xBBu8, 0xCCu8])); // payload
 
         assert_eq!(body, expected_body);

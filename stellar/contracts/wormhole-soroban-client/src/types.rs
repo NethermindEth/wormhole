@@ -83,20 +83,6 @@ pub struct GuardianSetInfo {
 
 // ========== Message Types ==========
 
-/// Finality requirement for cross-chain message attestation.
-///
-/// Determines how many block confirmations guardians wait before signing.
-/// Higher levels provide stronger finality guarantees but increase latency.
-#[contracttype]
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[repr(u8)]
-pub enum ConsistencyLevel {
-    /// Standard confirmation (~1 block, fastest).
-    Confirmed = 1,
-    /// Full finality (chain-specific, most secure).
-    Finalized = 32,
-}
-
 /// Serializable representation of a posted cross-chain message.
 ///
 /// Created when a message is posted via `post_message`. The message data is
@@ -115,8 +101,8 @@ pub struct PostedMessageData {
     pub emitter_address: BytesN<32>,
     /// Auto-incrementing sequence number for this emitter.
     pub sequence: u64,
-    /// Requested finality level for guardian attestation.
-    pub consistency_level: ConsistencyLevel,
+    /// Consistency level copied into the VAA body.
+    pub consistency_level: u32,
     /// Application-specific message payload.
     pub payload: Bytes,
 }

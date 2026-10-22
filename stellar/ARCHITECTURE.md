@@ -72,7 +72,7 @@ fn post_message(
     emitter: Address,              // Must authorize the call
     nonce: u32,                    // Caller-provided deduplication
     payload: Bytes,                // Application-specific data
-    consistency_level: ConsistencyLevel,
+    consistency_level: u32,        // 0..=255, copied into the VAA body
 ) -> Result<u64, WormholeError>;
 ```
 
@@ -150,17 +150,6 @@ pub struct Signature {
     pub r: BytesN<32>,
     pub s: BytesN<32>,
     pub v: u8,
-}
-```
-
-### ConsistencyLevel
-
-Finality requirements for message attestation:
-
-```rust
-pub enum ConsistencyLevel {
-    Confirmed = 0,   // Faster, less secure
-    Finalized = 1,   // Slower, maximum security
 }
 ```
 
