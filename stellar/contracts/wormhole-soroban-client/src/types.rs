@@ -59,8 +59,8 @@ pub struct VAA {
     pub emitter_address: BytesN<32>,
     /// Auto-incrementing sequence number from the emitter.
     pub sequence: u64,
-    /// Finality level requested when the message was posted.
-    pub consistency_level: ConsistencyLevel,
+    /// Consistency level byte from the VAA body. The source chain defines what each value means.
+    pub consistency_level: u32,
     /// Application-specific payload data.
     pub payload: Bytes,
 }
@@ -95,21 +95,6 @@ pub enum ConsistencyLevel {
     Confirmed = 1,
     /// Full finality (chain-specific, most secure).
     Finalized = 32,
-}
-
-impl TryFrom<u8> for ConsistencyLevel {
-    type Error = crate::WormholeError;
-
-    /// Converts a raw byte to a `ConsistencyLevel`.
-    ///
-    /// Only values 1 (`Confirmed`) and 32 (`Finalized`) are valid.
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            1 => Ok(ConsistencyLevel::Confirmed),
-            32 => Ok(ConsistencyLevel::Finalized),
-            _ => Err(crate::WormholeError::InvalidConsistencyLevel),
-        }
-    }
 }
 
 /// Serializable representation of a posted cross-chain message.
@@ -191,7 +176,7 @@ impl<'a> TryFrom<(&'a Env, &'a Bytes)> for VAA {
         let emitter_chain = u32::from(reader.read_u16_be()?);
         let emitter_address = reader.read_bytes_n::<32>()?;
         let sequence = reader.read_u64_be()?;
-        let consistency_level = ConsistencyLevel::try_from(reader.read_u8()?)?;
+        let consistency_level = u32::from(reader.read_u8()?);
         let payload = reader.remaining_bytes();
 
         Ok(VAA {

@@ -106,7 +106,7 @@ pub struct VAA {
     pub emitter_chain: u32,
     pub emitter_address: BytesN<32>,
     pub sequence: u64,
-    pub consistency_level: u8,
+    pub consistency_level: u32,
     pub payload: Bytes,
     pub body_hash: BytesN<32>,
 }

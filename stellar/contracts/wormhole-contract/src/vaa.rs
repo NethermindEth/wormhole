@@ -168,7 +168,7 @@ mod tests {
             emitter_chain: 61,
             emitter_address: BytesN::<32>::from_array(env, &[0x33u8; 32]),
             sequence: 7,
-            consistency_level: ConsistencyLevel::Confirmed,
+            consistency_level: 1,
             payload: Bytes::from_slice(env, &[0xAA, 0xBB]),
         }
     }
@@ -261,10 +261,26 @@ mod tests {
         assert_eq!(vaa.emitter_address, expected_emitter_address);
 
         assert_eq!(vaa.sequence, sequence);
-        assert_eq!(vaa.consistency_level, ConsistencyLevel::Confirmed);
+        assert_eq!(vaa.consistency_level, u32::from(consistency_level_u8));
 
         let expected_payload = Bytes::from_slice(&env, &payload);
         assert_eq!(vaa.payload, expected_payload);
+    }
+
+    #[test]
+    fn test_parse_vaa_accepts_any_consistency_level() {
+        let env = Env::default();
+        let (_contract_id, client) = deploy_initialized(&env);
+
+        for consistency_level in [0, 200, 201, 202, 203, 255] {
+            let mut vaa = base_vaa_with_guardian_set(&env, 0);
+            vaa.consistency_level = consistency_level;
+            // version 1, guardian set 0, no signatures
+            let mut raw = Bytes::from_array(&env, &[1, 0, 0, 0, 0, 0]);
+            raw.append(&vaa.serialize_body(&env));
+
+            assert_eq!(client.parse_vaa(&raw), vaa);
+        }
     }
 
     #[test]
@@ -394,7 +410,7 @@ mod tests {
             emitter_chain: 61,
             emitter_address: BytesN::<32>::from_array(&env, &[0x11u8; 32]),
             sequence: 0,
-            consistency_level: ConsistencyLevel::Confirmed,
+            consistency_level: 1,
             payload: Bytes::from_slice(&env, &[0xAA, 0xBB]),
         };
 
@@ -419,7 +435,7 @@ mod tests {
             emitter_chain: 61,
             emitter_address: BytesN::<32>::from_array(&env, &[0x33u8; 32]),
             sequence: 7,
-            consistency_level: ConsistencyLevel::Confirmed,
+            consistency_level: 1,
             payload: Bytes::from_slice(&env, &[0xAA, 0xBB]),
         };
 
