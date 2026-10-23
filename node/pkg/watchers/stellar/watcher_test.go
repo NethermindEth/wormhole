@@ -266,6 +266,24 @@ func newTestWatcher(rpcURL string, maxPerPoll int, msgC chan<- *common.MessagePu
 	return w
 }
 
+// makeMsgEvent builds a message_published event in the given ledger. Its tx hash, nonce, and
+// sequence all derive from idx.
+func makeMsgEvent(t *testing.T, idx uint32, ledger uint64) mockEvent {
+	t.Helper()
+	emitter := make([]byte, 32)
+	emitter[0] = 0x01
+	return mockEvent{
+		id:             fmt.Sprintf("%010d-%010d", ledger, idx),
+		ledger:         ledger,
+		ledgerClosedAt: "2024-01-01T00:00:00Z",
+		contractID:     testContract,
+		txHash:         fmt.Sprintf("%064x", idx),
+		topic0B64:      makeTopicB64(t, "wormhole"),
+		topic1B64:      makeTopicB64(t, "message_published"),
+		valueB64:       makeEventValueB64(t, idx, uint64(idx), emitter, []byte("pay"), 0),
+	}
+}
+
 func mustDecodeHex(s string) []byte {
 	b, err := hex.DecodeString(s)
 	if err != nil {
@@ -338,28 +356,11 @@ func TestPollOnce_MessagePublished(t *testing.T) {
 func TestPollOnce_Pagination(t *testing.T) {
 	// With maxPerPoll=2 and 3 events, the watcher must make two getEvents calls
 	// (using cursor-based pagination) and deliver all 3 messages.
-	emitter := make([]byte, 32)
-	emitter[0] = 0x01
-
-	closedAt := "2024-01-01T00:00:00Z"
-	makeEv := func(idx uint32, ledger uint64) mockEvent {
-		return mockEvent{
-			id:             fmt.Sprintf("0000000%03d-0000000001", ledger),
-			ledger:         ledger,
-			ledgerClosedAt: closedAt,
-			contractID:     testContract,
-			txHash:         fmt.Sprintf("%064x", idx),
-			topic0B64:      makeTopicB64(t, "wormhole"),
-			topic1B64:      makeTopicB64(t, "message_published"),
-			valueB64:       makeEventValueB64(t, uint32(idx), uint64(idx), emitter, []byte("pay"), 0),
-		}
-	}
-
 	mock := newMockRPC(300)
 	mock.events = []mockEvent{
-		makeEv(1, 100),
-		makeEv(2, 101),
-		makeEv(3, 102),
+		makeMsgEvent(t, 1, 100),
+		makeMsgEvent(t, 2, 101),
+		makeMsgEvent(t, 3, 102),
 	}
 
 	srv := httptest.NewServer(mock)
