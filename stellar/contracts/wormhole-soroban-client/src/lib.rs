@@ -14,14 +14,18 @@
 //!
 //! # Examples
 //!
-//! ```ignore
+//! ```no_run
+//! # use soroban_sdk::{Address, Bytes, Env};
 //! use wormhole_soroban_client::{ConsistencyLevel, WormholeClient};
 //!
+//! # fn example(env: Env, wormhole: Address, emitter: Address, payload: Bytes, vaa_bytes: Bytes) {
+//! # let nonce = 0;
 //! let client = WormholeClient::new(&env, &wormhole);
 //! let vaa = client.parse_and_verify_vaa(&vaa_bytes);
 //!
 //! // Post a cross-chain message (emitter is always treated as a contract)
 //! let sequence = client.post_message(&emitter, &nonce, &payload, &ConsistencyLevel::Finalized);
+//! # }
 //! ```
 
 #![no_std]
