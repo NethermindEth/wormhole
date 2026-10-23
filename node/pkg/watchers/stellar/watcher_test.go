@@ -510,8 +510,9 @@ func TestHandleReobservation_Success(t *testing.T) {
 	emitter[0] = 0xFF
 	payload := []byte("reobs payload")
 	txHash := "ccddccddccddccddccddccddccddccddccddccddccddccddccddccddccddccdd"
-	createdAt := int64(1718445600) // 2024-06-15T14:00:00Z
-	expectedTS := time.Unix(createdAt, 0).UTC()
+	createdAt := int64(1718445600) // 2024-06-15T10:00:00Z, must be ignored
+	closedAt := "2024-06-15T14:00:00Z"
+	expectedTS, _ := time.Parse(time.RFC3339, closedAt)
 
 	mock := newMockRPC(300)
 	mock.transactions[txHash] = mockTx{status: "SUCCESS", ledger: 200, createdAt: createdAt}
@@ -519,7 +520,7 @@ func TestHandleReobservation_Success(t *testing.T) {
 		{
 			id:             "0000000200-0000000001",
 			ledger:         200,
-			ledgerClosedAt: "2024-06-15T14:00:00Z",
+			ledgerClosedAt: closedAt,
 			contractID:     testContract,
 			txHash:         txHash,
 			topic0B64:      makeTopicB64(t, "wormhole"),
@@ -548,7 +549,7 @@ func TestHandleReobservation_Success(t *testing.T) {
 		assert.Equal(t, vaa.ChainIDStellar, mp.EmitterChain)
 		assert.Equal(t, mustDecodeHex(txHash), mp.TxID)
 		assert.Equal(t, expectedTS, mp.Timestamp,
-			"timestamp must come from createdAt returned by getTransaction, not time.Now()")
+			"timestamp must come from ledgerClosedAt, like the poll path")
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for reobserved message")
 	}
@@ -576,13 +577,11 @@ func TestHandleReobservation_NoMatchingEvents(t *testing.T) {
 	// getTransaction succeeds but the events at that ledger belong to a different txHash.
 	ourTxHash := "aaaa000000000000000000000000000000000000000000000000000000000000"
 	otherTxHash := "bbbb000000000000000000000000000000000000000000000000000000000000"
-	createdAt := int64(1718445600)
-
 	emitter := make([]byte, 32)
 	emitter[0] = 0x01
 
 	mock := newMockRPC(300)
-	mock.transactions[ourTxHash] = mockTx{status: "SUCCESS", ledger: 200, createdAt: createdAt}
+	mock.transactions[ourTxHash] = mockTx{status: "SUCCESS", ledger: 200}
 	mock.events = []mockEvent{
 		{
 			id:             "0000000200-0000000001",
@@ -617,11 +616,10 @@ func TestReobserve_UsesCustomEndpoint(t *testing.T) {
 	emitter := make([]byte, 32)
 	emitter[0] = 0xDE
 	txHash := "dead000000000000000000000000000000000000000000000000000000000000"
-	createdAt := int64(1700000000)
 
 	primaryMock := newMockRPC(100) // primary server: no transactions
 	customMock := newMockRPC(300)  // custom server: has the transaction
-	customMock.transactions[txHash] = mockTx{status: "SUCCESS", ledger: 200, createdAt: createdAt}
+	customMock.transactions[txHash] = mockTx{status: "SUCCESS", ledger: 200}
 	customMock.events = []mockEvent{
 		{
 			id:             "0000000200-0000000001",

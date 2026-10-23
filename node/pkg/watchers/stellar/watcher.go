@@ -313,12 +313,12 @@ func (w *watcher) Reobserve(ctx context.Context, chainID vaa.ChainID, txID []byt
 	return w.handleReobservationRequest(ctx, txHash, customEndpoint, httpClient)
 }
 
-// handleReobservationRequest fetches events for a specific transaction using getTransaction
-// to get the accurate ledger timestamp, then queries events for that ledger.
+// handleReobservationRequest finds the ledger of a specific transaction using getTransaction,
+// then queries events for that ledger.
 func (w *watcher) handleReobservationRequest(ctx context.Context, txHash, rpcURL string, httpClient *http.Client) (uint32, error) {
 	logger := w.logger
 
-	// Use getTransaction to get the ledger sequence and timestamp for this transaction.
+	// Use getTransaction to get the ledger sequence for this transaction.
 	txRes, err := rpcCall(ctx, "getTransaction", map[string]any{"hash": txHash}, rpcURL, httpClient)
 	if err != nil {
 		return 0, fmt.Errorf("getTransaction failed: %w", err)
@@ -337,8 +337,6 @@ func (w *watcher) handleReobservationRequest(ctx context.Context, txHash, rpcURL
 	}
 
 	ledger := gjson.GetBytes(*txRes, "ledger").Uint()
-	createdAt := gjson.GetBytes(*txRes, "createdAt").Int()
-	timestamp := time.Unix(createdAt, 0).UTC()
 
 	txIDBytes, err := hex.DecodeString(txHash)
 	if err != nil {
@@ -374,9 +372,16 @@ func (w *watcher) handleReobservationRequest(ctx context.Context, txHash, rpcURL
 			continue
 		}
 
+		// Same timestamp source as the poll path, so both produce the same VAA.
+		ts, err := time.Parse(time.RFC3339, e.Get("ledgerClosedAt").Str)
+		if err != nil {
+			logger.Warn("failed to parse ledgerClosedAt, skipping event", zap.Error(err))
+			continue
+		}
+
 		mp := &common.MessagePublication{
 			TxID:             txIDBytes,
-			Timestamp:        timestamp,
+			Timestamp:        ts,
 			Nonce:            parsed.nonce,
 			Sequence:         parsed.sequence,
 			ConsistencyLevel: parsed.consistencyLevel,
