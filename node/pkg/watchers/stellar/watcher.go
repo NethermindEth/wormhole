@@ -451,6 +451,9 @@ func rpcCall(ctx context.Context, method string, params any, rpcURL string, http
 	if rr.Error != nil {
 		return nil, fmt.Errorf("jsonrpc error %d: %s", rr.Error.Code, rr.Error.Message)
 	}
+	if rr.Result == nil {
+		return nil, fmt.Errorf("jsonrpc: missing result")
+	}
 	return rr.Result, nil
 }
 

@@ -644,3 +644,13 @@ func TestReobserve_UsesCustomEndpoint(t *testing.T) {
 		t.Fatal("timed out waiting for reobserved message from custom endpoint")
 	}
 }
+
+func TestRPCCall_NullResult(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"jsonrpc":"2.0","id":1,"result":null}`)
+	}))
+	defer srv.Close()
+
+	_, err := rpcCall(context.Background(), "getTransaction", nil, srv.URL, srv.Client())
+	require.EqualError(t, err, "jsonrpc: missing result")
+}
