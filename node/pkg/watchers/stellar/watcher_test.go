@@ -667,6 +667,17 @@ func TestReobservationHandler_FailureAddsErrorCount(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestReobservationHandler_PanicsOnWrongChain(t *testing.T) {
+	obsvReqC := make(chan *gossipv1.ObservationRequest, 1)
+	obsvReqC <- &gossipv1.ObservationRequest{ChainId: uint32(vaa.ChainIDEthereum)}
+	w := newTestWatcher("", 128, nil)
+	w.obsvReqC = obsvReqC
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.PanicsWithValue(t, "invalid chain ID", func() { _ = w.runReobservationHandler(ctx) })
+}
+
 func TestRPCCall_NullResult(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, `{"jsonrpc":"2.0","id":1,"result":null}`)

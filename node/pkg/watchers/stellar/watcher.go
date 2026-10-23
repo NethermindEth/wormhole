@@ -256,7 +256,8 @@ func (w *watcher) getInitialLedger(ctx context.Context, logger *zap.Logger) (uin
 	}
 }
 
-// runReobservationHandler handles incoming reobservation requests. Returns an error only on fatal failure.
+// runReobservationHandler serves reobservation requests until ctx is canceled. It panics on a
+// request for another chain.
 func (w *watcher) runReobservationHandler(ctx context.Context) error {
 	logger := w.logger
 	for {
@@ -264,19 +265,10 @@ func (w *watcher) runReobservationHandler(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case req := <-w.obsvReqC:
-			if req.ChainId > math.MaxUint16 {
-				logger.Debug("ignoring reobservation request for invalid chain",
-					zap.Uint32("requestChainId", req.ChainId),
-					zap.String("watcherChainId", w.chainID.String()),
-				)
-				continue
-			}
-			if vaa.ChainID(req.ChainId) != w.chainID {
-				logger.Debug("ignoring reobservation request for different chain",
-					zap.Uint32("requestChainId", req.ChainId),
-					zap.String("watcherChainId", w.chainID.String()),
-				)
-				continue
+			// node/pkg/node/reobserve.go sends only this chain's requests here, so a mismatch
+			// is a bug in the node's channel setup.
+			if req.ChainId > math.MaxUint16 || vaa.ChainID(req.ChainId) != w.chainID {
+				panic("invalid chain ID")
 			}
 
 			txHash := hex.EncodeToString(req.TxHash)
