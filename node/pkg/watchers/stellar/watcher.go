@@ -345,26 +345,32 @@ func (w *watcher) handleReobservationRequest(ctx context.Context, txHash, rpcURL
 		return 0, fmt.Errorf("failed to decode txHash: %w", err)
 	}
 
-	// Query events starting from the transaction's ledger.
+	// A tx's events are all in its own ledger, so page from that ledger until a page ends past it.
+	pagination := map[string]any{"limit": w.maxPerPoll}
 	params := map[string]any{
 		"startLedger": ledger,
 		"filters": []map[string]any{
 			{"type": "contract", "contractIds": []string{w.contract}},
 		},
-		"pagination": map[string]any{"limit": w.maxPerPoll},
+		"pagination": pagination,
 	}
-	res, err := rpcCall(ctx, "getEvents", params, rpcURL, httpClient)
-	if err != nil {
-		return 0, fmt.Errorf("getEvents failed: %w", err)
-	}
-
-	events := gjson.GetBytes(*res, "events")
-	if !events.Exists() {
-		return 0, nil
+	var events []gjson.Result
+	for {
+		res, err := rpcCall(ctx, "getEvents", params, rpcURL, httpClient)
+		if err != nil {
+			return 0, fmt.Errorf("getEvents failed: %w", err)
+		}
+		page := gjson.GetBytes(*res, "events").Array()
+		events = append(events, page...)
+		if len(page) < w.maxPerPoll || page[len(page)-1].Get("ledger").Uint() > ledger {
+			break
+		}
+		delete(params, "startLedger") // getEvents rejects startLedger together with a cursor
+		pagination["cursor"] = page[len(page)-1].Get("id").Str
 	}
 
 	var messagesFound uint32
-	for _, e := range events.Array() {
+	for _, e := range events {
 		if e.Get("txHash").Str != txHash {
 			continue
 		}
