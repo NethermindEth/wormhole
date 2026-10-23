@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/certusone/wormhole/node/pkg/common"
+	"github.com/certusone/wormhole/node/pkg/p2p"
+	gossipv1 "github.com/certusone/wormhole/node/pkg/proto/gossip/v1"
 	stellarxdr "github.com/stellar/go/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -643,6 +645,26 @@ func TestReobserve_UsesCustomEndpoint(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for reobserved message from custom endpoint")
 	}
+}
+
+func TestReobservationHandler_FailureAddsErrorCount(t *testing.T) {
+	// The mock holds no transactions, so getTransaction returns NOT_FOUND.
+	srv := httptest.NewServer(newMockRPC(300))
+	defer srv.Close()
+
+	obsvReqC := make(chan *gossipv1.ObservationRequest, 1)
+	w := newTestWatcher(srv.URL, 128, nil)
+	w.obsvReqC = obsvReqC
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = w.runReobservationHandler(ctx) }()
+
+	before := p2p.DefaultRegistry.GetErrorCount(vaa.ChainIDStellar)
+	obsvReqC <- &gossipv1.ObservationRequest{ChainId: uint32(vaa.ChainIDStellar), TxHash: make([]byte, 32)}
+	require.Eventually(t, func() bool {
+		return p2p.DefaultRegistry.GetErrorCount(vaa.ChainIDStellar) == before+1
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestRPCCall_NullResult(t *testing.T) {

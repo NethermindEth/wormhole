@@ -284,6 +284,7 @@ func (w *watcher) runReobservationHandler(ctx context.Context) error {
 
 			count, err := w.handleReobservationRequest(ctx, txHash, w.rpc, w.httpClient)
 			if err != nil {
+				p2p.DefaultRegistry.AddErrorCount(w.chainID, 1)
 				logger.Error("failed to handle reobservation request",
 					zap.String("txHash", txHash),
 					zap.Error(err),
