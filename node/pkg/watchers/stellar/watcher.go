@@ -631,8 +631,9 @@ func (w *watcher) parseMessageFromXDR(data []byte) (*parsedMessage, error) {
 		return nil, fmt.Errorf("failed to unmarshal XDR: %w", err)
 	}
 
+	// An SCV_MAP without a map body decodes to a nil *ScMap.
 	eventMap, ok := scVal.GetMap()
-	if !ok {
+	if !ok || eventMap == nil {
 		return nil, fmt.Errorf("event value is not a map")
 	}
 

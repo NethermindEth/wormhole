@@ -2,6 +2,7 @@ package stellar
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -482,6 +483,22 @@ func TestPollOnce_NoEventsAdvancesNextLedger(t *testing.T) {
 
 	assert.Equal(t, 0, mock.methodCount("getLatestLedger"),
 		"getLatestLedger must not be called separately; latestLedger comes from the getEvents response")
+}
+
+func TestParseMessageFromXDR_Rejects(t *testing.T) {
+	tests := map[string]struct{ value, wantErr string }{
+		"nil map": {"AAAAEQAAAAA=", "not a map"},
+	}
+
+	w := &watcher{}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			value, err := base64.StdEncoding.DecodeString(tc.value)
+			require.NoError(t, err)
+			_, err = w.parseMessageFromXDR(value)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------
