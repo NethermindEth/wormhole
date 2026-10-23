@@ -201,6 +201,7 @@ func (w *watcher) Run(ctx context.Context) error {
 
 	t := time.NewTicker(w.pollInterval)
 	defer t.Stop()
+	supervisor.Signal(ctx, supervisor.SignalHealthy)
 	logger.Info("stellar watcher started")
 
 	for {
