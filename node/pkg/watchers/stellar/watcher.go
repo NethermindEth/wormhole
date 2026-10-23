@@ -338,11 +338,6 @@ func (w *watcher) handleReobservationRequest(ctx context.Context, txHash, rpcURL
 
 	ledger := gjson.GetBytes(*txRes, "ledger").Uint()
 
-	txIDBytes, err := hex.DecodeString(txHash)
-	if err != nil {
-		return 0, fmt.Errorf("failed to decode txHash: %w", err)
-	}
-
 	// Query events starting from the transaction's ledger.
 	params := map[string]any{
 		"startLedger": ledger,
@@ -367,29 +362,9 @@ func (w *watcher) handleReobservationRequest(ctx context.Context, txHash, rpcURL
 			continue
 		}
 
-		parsed := w.parseEventJSON(e, logger)
-		if parsed == nil {
+		mp := w.messageFromEvent(e, true)
+		if mp == nil {
 			continue
-		}
-
-		// Same timestamp source as the poll path, so both produce the same VAA.
-		ts, err := time.Parse(time.RFC3339, e.Get("ledgerClosedAt").Str)
-		if err != nil {
-			logger.Warn("failed to parse ledgerClosedAt, skipping event", zap.Error(err))
-			continue
-		}
-
-		mp := &common.MessagePublication{
-			TxID:             txIDBytes,
-			Timestamp:        ts,
-			Nonce:            parsed.nonce,
-			Sequence:         parsed.sequence,
-			ConsistencyLevel: parsed.consistencyLevel,
-			EmitterChain:     w.chainID,
-			EmitterAddress:   parsed.emitterAddress,
-			Payload:          parsed.payload,
-			IsReobservation:  true,
-			Unreliable:       false,
 		}
 
 		logger.Info("reobserved stellar message", mp.ZapFields(zap.Uint64("ledger", ledger))...)
@@ -517,43 +492,10 @@ func (w *watcher) pollOnce(ctx context.Context, logger *zap.Logger) (bool, error
 			cursor = e.Get("id").Str
 
 			ledger := e.Get("ledger").Uint()
-			txHash := e.Get("txHash").Str
 
-			parsed := w.parseEventJSON(e, logger)
-			if parsed == nil {
+			mp := w.messageFromEvent(e, false)
+			if mp == nil {
 				continue
-			}
-
-			txIDBytes, err := hex.DecodeString(txHash)
-			if err != nil {
-				logger.Warn("failed to decode txHash", zap.String("txHash", txHash), zap.Error(err))
-				continue
-			}
-
-			// Use ledgerClosedAt from the event for a deterministic timestamp.
-			// All guardians observing the same event will use the same timestamp,
-			// ensuring identical VAAs are produced.
-			closedAt := e.Get("ledgerClosedAt").Str
-			ts, err := time.Parse(time.RFC3339, closedAt)
-			if err != nil {
-				logger.Warn("failed to parse ledgerClosedAt, skipping event",
-					zap.String("ledgerClosedAt", closedAt),
-					zap.Error(err),
-				)
-				continue
-			}
-
-			mp := &common.MessagePublication{
-				TxID:             txIDBytes,
-				Timestamp:        ts,
-				Nonce:            parsed.nonce,
-				Sequence:         parsed.sequence,
-				ConsistencyLevel: parsed.consistencyLevel,
-				EmitterChain:     w.chainID,
-				EmitterAddress:   parsed.emitterAddress,
-				Payload:          parsed.payload,
-				IsReobservation:  false,
-				Unreliable:       false,
 			}
 
 			stellarMessagesObserved.WithLabelValues(w.networkName).Inc()
@@ -598,9 +540,9 @@ type parsedMessage struct {
 	payload          []byte
 }
 
-// parseEventJSON checks the event topics for a message_published event and parses the event data.
-// Returns nil if the event is not a message_published event or cannot be parsed.
-func (w *watcher) parseEventJSON(e gjson.Result, logger *zap.Logger) *parsedMessage {
+// messageFromEvent returns the MessagePublication for a message_published event, or nil for any
+// other event. Events that fail to parse are logged and skipped.
+func (w *watcher) messageFromEvent(e gjson.Result, isReobservation bool) *common.MessagePublication {
 	topics := e.Get("topic").Array()
 	if len(topics) < minEventTopicCount {
 		return nil
@@ -614,18 +556,49 @@ func (w *watcher) parseEventJSON(e gjson.Result, logger *zap.Logger) *parsedMess
 		return nil
 	}
 
-	valueBytes, err := base64.StdEncoding.DecodeString(e.Get("value").Str)
+	mp, err := w.parseMessagePublished(e, isReobservation)
 	if err != nil {
-		logger.Debug("failed to decode event value", zap.Error(err))
+		w.logger.Warn("skipping invalid message_published event", zap.String("id", e.Get("id").Str), zap.Error(err))
 		return nil
+	}
+	return mp
+}
+
+// parseMessagePublished builds the MessagePublication for a message_published event.
+func (w *watcher) parseMessagePublished(e gjson.Result, isReobservation bool) (*common.MessagePublication, error) {
+	txID, err := hex.DecodeString(e.Get("txHash").Str)
+	if err != nil {
+		return nil, fmt.Errorf("invalid txHash %q", e.Get("txHash").Str)
 	}
 
-	parsed, err := w.parseMessageFromXDR(valueBytes)
+	// ledgerClosedAt is the same for every guardian, so they all produce the same VAA.
+	ts, err := time.Parse(time.RFC3339, e.Get("ledgerClosedAt").Str)
 	if err != nil {
-		logger.Warn("failed to parse message_published event, skipping", zap.Error(err))
-		return nil
+		return nil, fmt.Errorf("invalid ledgerClosedAt: %w", err)
 	}
-	return parsed
+
+	value, err := base64.StdEncoding.DecodeString(e.Get("value").Str)
+	if err != nil {
+		return nil, fmt.Errorf("invalid event value: %w", err)
+	}
+
+	msg, err := w.parseMessageFromXDR(value)
+	if err != nil {
+		return nil, err
+	}
+
+	return &common.MessagePublication{
+		TxID:             txID,
+		Timestamp:        ts,
+		Nonce:            msg.nonce,
+		Sequence:         msg.sequence,
+		ConsistencyLevel: msg.consistencyLevel,
+		EmitterChain:     w.chainID,
+		EmitterAddress:   msg.emitterAddress,
+		Payload:          msg.payload,
+		IsReobservation:  isReobservation,
+		Unreliable:       false,
+	}, nil
 }
 
 // parseMessageFromXDR parses the XDR-encoded Soroban event value into the published message fields.
