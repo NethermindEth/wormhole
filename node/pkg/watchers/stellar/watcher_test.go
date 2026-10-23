@@ -408,7 +408,6 @@ func TestPollOnce_Pagination(t *testing.T) {
 }
 
 func TestPollOnce_SkipsEmptyEmitter(t *testing.T) {
-	// An event with an empty emitter_address must be dropped.
 	emptyEmitter := []byte{}
 
 	mock := newMockRPC(200)
@@ -609,7 +608,7 @@ func TestHandleReobservation_Success(t *testing.T) {
 	emitter[0] = 0xFF
 	payload := []byte("reobs payload")
 	txHash := "ccddccddccddccddccddccddccddccddccddccddccddccddccddccddccddccdd"
-	createdAt := int64(1718445600) // 2024-06-15T10:00:00Z, must be ignored
+	createdAt := int64(1718445600) // 2024-06-15T10:00:00Z, which the watcher must ignore
 	closedAt := "2024-06-15T14:00:00Z"
 	expectedTS, _ := time.Parse(time.RFC3339, closedAt)
 

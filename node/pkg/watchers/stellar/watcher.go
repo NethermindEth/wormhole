@@ -330,7 +330,6 @@ func (w *watcher) Reobserve(ctx context.Context, chainID vaa.ChainID, txID []byt
 func (w *watcher) handleReobservationRequest(ctx context.Context, txHash, rpcURL string, httpClient *http.Client) (uint32, error) {
 	logger := w.logger
 
-	// Use getTransaction to get the ledger sequence for this transaction.
 	txRes, err := rpcCall(ctx, "getTransaction", map[string]any{"hash": txHash}, rpcURL, httpClient)
 	if err != nil {
 		return 0, fmt.Errorf("getTransaction failed: %w", err)
@@ -553,9 +552,9 @@ type parsedMessage struct {
 }
 
 // messageFromEvent returns the MessagePublication for a message_published event from the core
-// contract, or nil for any other event. Events that fail to parse are logged, counted and skipped.
+// contract, or nil for any other event. It logs, counts, and skips events that fail to parse.
 func (w *watcher) messageFromEvent(e gjson.Result, isReobservation bool) *common.MessagePublication {
-	// Match loosely, so a contract upgrade that changes the event shape fails to parse instead of being skipped.
+	// Match loosely, so an event reshaped by a contract upgrade is a parse failure, not a skip.
 	topics := e.Get("topic").Array()
 	if e.Get("contractId").Str != w.contract || len(topics) < eventTopicCount || topics[1].Str != topicMessagePublished {
 		return nil
