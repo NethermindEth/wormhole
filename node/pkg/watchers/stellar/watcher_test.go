@@ -96,6 +96,8 @@ type mockSorobanRPC struct {
 	events       []mockEvent
 	transactions map[string]mockTx
 	methodCounts map[string]int
+	// failGetEventsCall is the 1-based number of the getEvents call that fails, or 0 for none.
+	failGetEventsCall int
 }
 
 func newMockRPC(latestLedger uint64) *mockSorobanRPC {
@@ -124,7 +126,12 @@ func (m *mockSorobanRPC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	m.mu.Lock()
 	m.methodCounts[req.Method]++
+	fail := req.Method == "getEvents" && m.methodCounts[req.Method] == m.failGetEventsCall
 	m.mu.Unlock()
+	if fail {
+		http.Error(w, "injected failure", http.StatusServiceUnavailable)
+		return
+	}
 
 	var result any
 	switch req.Method {
@@ -392,6 +399,47 @@ func TestPollOnce_Pagination(t *testing.T) {
 
 	// Two getEvents calls: first page (2 events), second page (1 event via cursor).
 	assert.Equal(t, 2, mock.methodCount("getEvents"), "expected 2 getEvents calls for pagination")
+}
+
+func TestPollOnce_PageFailureMidLedger(t *testing.T) {
+	// A page that ends inside a ledger, followed by a failed cursor request, must not
+	// skip the rest of that ledger on the next poll.
+	tests := []struct {
+		name    string
+		ledgers []uint64
+	}{
+		{"ledger spans pages", []uint64{100, 100, 100}},
+		{"page ends mid-ledger", []uint64{100, 101, 101}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := newMockRPC(300)
+			for i, ledger := range tc.ledgers {
+				mock.events = append(mock.events, makeMsgEvent(t, uint32(i+1), ledger))
+			}
+			mock.failGetEventsCall = 2 // first cursor request
+
+			srv := httptest.NewServer(mock)
+			defer srv.Close()
+
+			msgC := make(chan *common.MessagePublication, 10)
+			w := newTestWatcher(srv.URL, 2, msgC)
+
+			_, err := w.pollOnce(context.Background(), zap.NewNop())
+			require.Error(t, err)
+			assert.Equal(t, tc.ledgers[1], w.nextLedger, "a failed page must resume at the last full page's ledger")
+			_, err = w.pollOnce(context.Background(), zap.NewNop())
+			require.NoError(t, err)
+
+			close(msgC)
+			var seqs []uint64
+			for mp := range msgC {
+				seqs = append(seqs, mp.Sequence)
+			}
+			assert.Contains(t, seqs, uint64(3), "event after the failed page must be delivered on retry")
+			assert.Equal(t, tc.ledgers[2]+1, w.nextLedger)
+		})
+	}
 }
 
 func TestPollOnce_SkipsEmptyEmitter(t *testing.T) {

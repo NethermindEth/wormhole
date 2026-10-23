@@ -470,6 +470,7 @@ func (w *watcher) getLatestLedger(ctx context.Context) (uint64, error) {
 func (w *watcher) pollOnce(ctx context.Context, logger *zap.Logger) (bool, error) {
 	advanced := false
 	cursor := ""
+	var lastLedger uint64
 
 	for {
 		pagination := map[string]any{
@@ -512,6 +513,7 @@ func (w *watcher) pollOnce(ctx context.Context, logger *zap.Logger) (bool, error
 			cursor = e.Get("id").Str
 
 			ledger := e.Get("ledger").Uint()
+			lastLedger = ledger
 			txHash := e.Get("txHash").Str
 
 			parsed := w.parseEventJSON(e, logger)
@@ -561,22 +563,22 @@ func (w *watcher) pollOnce(ctx context.Context, logger *zap.Logger) (bool, error
 			case <-ctx.Done():
 				return advanced, ctx.Err()
 			}
-
-			if ledger >= w.nextLedger {
-				w.nextLedger = ledger + 1
-				advanced = true
-			}
 		}
 
 		if len(events) < w.maxPerPoll {
 			// Received fewer events than the limit — no more pages.
-			if !advanced && latestLedger > w.nextLedger {
+			if lastLedger > 0 {
+				w.nextLedger = lastLedger + 1
+				advanced = true
+			} else if latestLedger > w.nextLedger {
 				w.nextLedger = latestLedger
 				advanced = true
 			}
 			break
 		}
 		// Received exactly maxPerPoll events — there may be more pages; continue with cursor.
+		// The next page may continue lastLedger, so if it fails the next poll restarts at lastLedger.
+		w.nextLedger = lastLedger
 	}
 
 	return advanced, nil
