@@ -12,17 +12,16 @@
 //! - [`ConsistencyLevel`] - Finality requirements for message attestation
 //! - [`WormholeError`] - All possible error conditions
 //!
-//! # Example
+//! # Examples
 //!
 //! ```ignore
-//! use wormhole_soroban_client::{WormholeCoreInterface, VAA, WormholeError};
+//! use wormhole_soroban_client::{ConsistencyLevel, WormholeClient};
 //!
-//! // Parse and verify a VAA
-//! let vaa = VAA::try_from((&env, &vaa_bytes))?;
-//! client.verify_vaa(&vaa_bytes)?;
+//! let client = WormholeClient::new(&env, &wormhole);
+//! let vaa = client.parse_and_verify_vaa(&vaa_bytes);
 //!
 //! // Post a cross-chain message (emitter is always treated as a contract)
-//! let sequence = client.post_message(&emitter, nonce, &payload, ConsistencyLevel::Finalized)?;
+//! let sequence = client.post_message(&emitter, &nonce, &payload, &ConsistencyLevel::Finalized);
 //! ```
 
 #![no_std]

@@ -134,7 +134,7 @@ If you want to verify a Wormhole VAA and read the payload:
 ```rust
 #![no_std]
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env};
-use wormhole_soroban_client::{WormholeClient, VAA};
+use wormhole_soroban_client::WormholeClient;
 
 #[contract]
 pub struct ReceiverContract;
@@ -149,9 +149,7 @@ impl ReceiverContract {
         let client = WormholeClient::new(&env, &wormhole);
 
         // Verifies signatures against the stored guardian set
-        client.verify_vaa(&vaa_bytes);
-
-        let vaa = client.parse_vaa(&vaa_bytes);
+        let vaa = client.parse_and_verify_vaa(&vaa_bytes);
 
         (vaa.emitter_chain, vaa.emitter_address, vaa.payload)
     }
