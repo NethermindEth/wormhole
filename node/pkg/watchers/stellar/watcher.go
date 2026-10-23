@@ -30,8 +30,14 @@ import (
 const (
 	defaultPollInterval = 700 * time.Millisecond
 	defaultReadTimeout  = 10 * time.Second
-	minEventTopicCount  = 2
+	eventTopicCount     = 2
+	messageFieldCount   = 5
 	stellarAddressLen   = 32
+	txHashLen           = 32
+
+	// Base64 XDR of the event topics Symbol("wormhole") and Symbol("message_published").
+	topicWormhole         = "AAAADwAAAAh3b3JtaG9sZQ=="
+	topicMessagePublished = "AAAADwAAABFtZXNzYWdlX3B1Ymxpc2hlZAAAAA=="
 )
 
 var (
@@ -540,19 +546,12 @@ type parsedMessage struct {
 	payload          []byte
 }
 
-// messageFromEvent returns the MessagePublication for a message_published event, or nil for any
-// other event. Events that fail to parse are logged and skipped.
+// messageFromEvent returns the MessagePublication for a message_published event from the core
+// contract, or nil for any other event. Events that fail to parse are logged and skipped.
 func (w *watcher) messageFromEvent(e gjson.Result, isReobservation bool) *common.MessagePublication {
+	// Match loosely, so a contract upgrade that changes the event shape fails to parse instead of being skipped.
 	topics := e.Get("topic").Array()
-	if len(topics) < minEventTopicCount {
-		return nil
-	}
-
-	eventNameBytes, err := base64.StdEncoding.DecodeString(topics[1].Str)
-	if err != nil {
-		return nil
-	}
-	if !bytes.Contains(eventNameBytes, []byte("message_published")) {
+	if e.Get("contractId").Str != w.contract || len(topics) < eventTopicCount || topics[1].Str != topicMessagePublished {
 		return nil
 	}
 
@@ -566,8 +565,12 @@ func (w *watcher) messageFromEvent(e gjson.Result, isReobservation bool) *common
 
 // parseMessagePublished builds the MessagePublication for a message_published event.
 func (w *watcher) parseMessagePublished(e gjson.Result, isReobservation bool) (*common.MessagePublication, error) {
+	if topics := e.Get("topic").Array(); e.Get("type").Str != "contract" || len(topics) != eventTopicCount || topics[0].Str != topicWormhole {
+		return nil, fmt.Errorf("unexpected event type %q or topics %s", e.Get("type").Str, e.Get("topic").Raw)
+	}
+
 	txID, err := hex.DecodeString(e.Get("txHash").Str)
-	if err != nil {
+	if err != nil || len(txID) != txHashLen {
 		return nil, fmt.Errorf("invalid txHash %q", e.Get("txHash").Str)
 	}
 
@@ -605,7 +608,7 @@ func (w *watcher) parseMessagePublished(e gjson.Result, isReobservation bool) (*
 func (w *watcher) parseMessageFromXDR(data []byte) (*parsedMessage, error) {
 	var scVal stellarxdr.ScVal
 
-	if _, err := stellarxdr.Unmarshal(bytes.NewReader(data), &scVal); err != nil {
+	if err := stellarxdr.SafeUnmarshal(data, &scVal); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal XDR: %w", err)
 	}
 
@@ -615,51 +618,36 @@ func (w *watcher) parseMessageFromXDR(data []byte) (*parsedMessage, error) {
 		return nil, fmt.Errorf("event value is not a map")
 	}
 
-	msg := &parsedMessage{}
-	var emitterAddress []byte
-
+	fields := make(map[stellarxdr.ScSymbol]stellarxdr.ScVal, len(*eventMap))
 	for _, entry := range *eventMap {
-		keySymbol, ok := entry.Key.GetSym()
-		if !ok {
-			continue
+		key, isSym := entry.Key.GetSym()
+		if _, dup := fields[key]; !isSym || dup {
+			return nil, fmt.Errorf("event map has a non-symbol or duplicate key %q", key)
 		}
-
-		switch string(keySymbol) {
-		case "nonce":
-			if val, ok := entry.Val.GetU32(); ok {
-				msg.nonce = uint32(val)
-			}
-		case "sequence":
-			if val, ok := entry.Val.GetU64(); ok {
-				msg.sequence = uint64(val)
-			}
-		case "emitter_address":
-			if val, ok := entry.Val.GetBytes(); ok {
-				emitterAddress = val
-			}
-		case "payload":
-			if val, ok := entry.Val.GetBytes(); ok {
-				msg.payload = val
-			}
-		case "consistency_level":
-			if val, ok := entry.Val.GetU32(); ok {
-				if val > math.MaxUint8 {
-					return nil, fmt.Errorf("consistency level %d overflows uint8", val)
-				}
-				msg.consistencyLevel = uint8(val)
-			}
-		}
+		fields[key] = entry.Val
 	}
 
-	if len(emitterAddress) == 0 {
-		return nil, fmt.Errorf("message_published event has empty emitter address")
+	// A missing field is the zero ScVal, so its getter fails like a wrong type does.
+	nonce, okNonce := fields["nonce"].GetU32()
+	seq, okSeq := fields["sequence"].GetU64()
+	emitter, okEmitter := fields["emitter_address"].GetBytes()
+	payload, okPayload := fields["payload"].GetBytes()
+	cl, okCL := fields["consistency_level"].GetU32()
+	if len(fields) != messageFieldCount || !okNonce || !okSeq || !okEmitter || !okPayload || !okCL {
+		return nil, fmt.Errorf("event map must hold exactly nonce (u32), sequence (u64), emitter_address (bytes), payload (bytes) and consistency_level (u32)")
+	}
+	if len(emitter) != stellarAddressLen {
+		return nil, fmt.Errorf("emitter address is %d bytes, want %d", len(emitter), stellarAddressLen)
+	}
+	if cl > math.MaxUint8 {
+		return nil, fmt.Errorf("consistency level %d overflows uint8", cl)
 	}
 
-	if len(emitterAddress) >= stellarAddressLen {
-		copy(msg.emitterAddress[:], emitterAddress[:stellarAddressLen])
-	} else {
-		copy(msg.emitterAddress[:], emitterAddress)
-	}
-
-	return msg, nil
+	return &parsedMessage{
+		nonce:            uint32(nonce),
+		sequence:         uint64(seq),
+		consistencyLevel: uint8(cl),
+		emitterAddress:   vaa.Address(emitter),
+		payload:          payload,
+	}, nil
 }
