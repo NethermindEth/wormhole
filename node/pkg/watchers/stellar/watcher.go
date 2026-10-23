@@ -193,7 +193,8 @@ func (w *watcher) Run(ctx context.Context) error {
 		ContractAddress: w.contract,
 	})
 
-	errC := make(chan error)
+	// Scissors sends without blocking, so the buffer keeps the error until Run reads it.
+	errC := make(chan error, 1)
 	common.RunWithScissors(ctx, errC, "stellar_reobservation", func(ctx context.Context) error {
 		return w.runReobservationHandler(ctx)
 	})
