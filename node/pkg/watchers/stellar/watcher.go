@@ -59,6 +59,12 @@ var (
 			Help: "Total number of Stellar messages confirmed (post-publish)",
 		}, []string{"network"})
 
+	stellarMessageParseFailures = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "wormhole_stellar_message_parse_failures_total",
+			Help: "Total number of Stellar message_published events from the core contract that failed to parse",
+		}, []string{"network"})
+
 	currentStellarLedger = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "wormhole_stellar_current_ledger",
@@ -547,7 +553,7 @@ type parsedMessage struct {
 }
 
 // messageFromEvent returns the MessagePublication for a message_published event from the core
-// contract, or nil for any other event. Events that fail to parse are logged and skipped.
+// contract, or nil for any other event. Events that fail to parse are logged, counted and skipped.
 func (w *watcher) messageFromEvent(e gjson.Result, isReobservation bool) *common.MessagePublication {
 	// Match loosely, so a contract upgrade that changes the event shape fails to parse instead of being skipped.
 	topics := e.Get("topic").Array()
@@ -557,6 +563,8 @@ func (w *watcher) messageFromEvent(e gjson.Result, isReobservation bool) *common
 
 	mp, err := w.parseMessagePublished(e, isReobservation)
 	if err != nil {
+		stellarMessageParseFailures.WithLabelValues(w.networkName).Inc()
+		p2p.DefaultRegistry.AddErrorCount(w.chainID, 1)
 		w.logger.Warn("skipping invalid message_published event", zap.String("id", e.Get("id").Str), zap.Error(err))
 		return nil
 	}

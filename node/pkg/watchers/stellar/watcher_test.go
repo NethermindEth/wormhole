@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/certusone/wormhole/node/pkg/common"
+	dto "github.com/prometheus/client_model/go"
 	stellarxdr "github.com/stellar/go/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -407,7 +408,7 @@ func TestPollOnce_Pagination(t *testing.T) {
 }
 
 func TestPollOnce_SkipsEmptyEmitter(t *testing.T) {
-	// An event with an empty emitter_address must be silently dropped.
+	// An event with an empty emitter_address must be dropped.
 	emptyEmitter := []byte{}
 
 	mock := newMockRPC(200)
@@ -580,6 +581,23 @@ func TestMessageFromEvent_Rejects(t *testing.T) {
 			assert.Nil(t, w.messageFromEvent(makeEvent(t, edit), false))
 		})
 	}
+}
+
+func TestMessageFromEvent_CountsParseFailures(t *testing.T) {
+	failures := func() float64 {
+		m := &dto.Metric{}
+		require.NoError(t, stellarMessageParseFailures.WithLabelValues(testNetworkID).Write(m))
+		return m.GetCounter().GetValue()
+	}
+	before := failures()
+
+	w := newTestWatcher("", 128, nil)
+	w.messageFromEvent(makeEvent(t, func(e map[string]any) { e["contractId"] = "other" }), false)
+	w.messageFromEvent(makeEvent(t, func(e map[string]any) { e["txHash"] = fmt.Sprintf("%062x", 1) }), false)
+	w.messageFromEvent(makeEvent(t, func(e map[string]any) {
+		e["topic"] = []string{makeTopicB64(t, "wormhole_core"), makeTopicB64(t, "message_published")}
+	}), false)
+	assert.Equal(t, before+2, failures(), "every message_published event from the core contract is counted")
 }
 
 // ---------------------------------------------------------------------------
