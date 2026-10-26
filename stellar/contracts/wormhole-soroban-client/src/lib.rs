@@ -9,14 +9,13 @@
 //!
 //! - [`VAA`] - Verifiable Action Approval, the core cross-chain message format
 //! - [`GuardianSetInfo`] - Guardian set metadata stored on-chain
-//! - [`ConsistencyLevel`] - Finality requirements for message attestation
 //! - [`WormholeError`] - All possible error conditions
 //!
 //! # Examples
 //!
 //! ```no_run
 //! # use soroban_sdk::{Address, Bytes, Env};
-//! use wormhole_soroban_client::{ConsistencyLevel, WormholeClient};
+//! use wormhole_soroban_client::WormholeClient;
 //!
 //! # fn example(env: Env, wormhole: Address, emitter: Address, payload: Bytes, vaa_bytes: Bytes) {
 //! # let nonce = 0;
@@ -24,7 +23,7 @@
 //! let vaa = client.parse_and_verify_vaa(&vaa_bytes);
 //!
 //! // Post a cross-chain message (emitter is always treated as a contract)
-//! let sequence = client.post_message(&emitter, &nonce, &payload, &ConsistencyLevel::Finalized);
+//! let sequence = client.post_message(&emitter, &nonce, &payload, &1);
 //! # }
 //! ```
 
@@ -187,7 +186,7 @@ pub trait WormholeCoreInterface {
     ///   authorize)
     /// * `nonce` - Unique nonce for the message
     /// * `payload` - Message payload bytes
-    /// * `consistency_level` - Finality requirement (Confirmed or Finalized)
+    /// * `consistency_level` - Consistency level copied into the VAA body, `0..=255`
     ///
     /// # Returns
     /// Sequence number assigned to the message
@@ -195,12 +194,13 @@ pub trait WormholeCoreInterface {
     /// # Errors
     /// * `Error::InsufficientFeePaid` - Fee not paid (requires prior token
     ///   approval)
+    /// * `Error::InvalidConsistencyLevel` - `consistency_level` is greater than 255
     fn post_message(
         env: Env,
         emitter: Address,
         nonce: u32,
         payload: Bytes,
-        consistency_level: ConsistencyLevel,
+        consistency_level: u32,
     ) -> Result<u64, WormholeError>;
 
     // ========== State Queries ==========
