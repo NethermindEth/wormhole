@@ -193,9 +193,11 @@ func (w *watcher) Run(ctx context.Context) error {
 	w.logger = logger
 
 	if w.nextLedger == 0 {
-		seq, err := w.getInitialLedger(ctx, logger)
+		seq, err := w.getLatestLedger(ctx)
 		if err != nil {
-			return err
+			stellarConnectionErrors.WithLabelValues(w.networkName, "initial_ledger").Inc()
+			p2p.DefaultRegistry.AddErrorCount(w.chainID, 1)
+			return fmt.Errorf("getLatestLedger failed: %w", err)
 		}
 		w.nextLedger = seq
 		logger.Info("initialized start ledger", zap.Uint64("ledger", w.nextLedger))
@@ -205,13 +207,15 @@ func (w *watcher) Run(ctx context.Context) error {
 		ContractAddress: w.contract,
 	})
 
-	errC := make(chan error)
+	// Scissors sends without blocking, so the buffer keeps the error until Run reads it.
+	errC := make(chan error, 1)
 	common.RunWithScissors(ctx, errC, "stellar_reobservation", func(ctx context.Context) error {
 		return w.runReobservationHandler(ctx)
 	})
 
 	t := time.NewTicker(w.pollInterval)
 	defer t.Stop()
+	supervisor.Signal(ctx, supervisor.SignalHealthy)
 	logger.Info("stellar watcher started")
 
 	for {
@@ -231,43 +235,8 @@ func (w *watcher) Run(ctx context.Context) error {
 	}
 }
 
-// getInitialLedger fetches the starting ledger, retrying with capped exponential
-// backoff. A transient RPC outage at startup (e.g. the Soroban RPC not yet
-// reachable when the guardian boots) must not kill the watcher, mirroring the
-// resilience of the poll loop. Returns an error only when the context is cancelled.
-func (w *watcher) getInitialLedger(ctx context.Context, logger *zap.Logger) (uint64, error) {
-	backoff := w.pollInterval
-	if backoff <= 0 {
-		backoff = defaultPollInterval
-	}
-	const maxBackoff = 60 * time.Second
-
-	for {
-		seq, err := w.getLatestLedger(ctx)
-		if err == nil {
-			return seq, nil
-		}
-
-		stellarConnectionErrors.WithLabelValues(w.networkName, "initial_ledger").Inc()
-		p2p.DefaultRegistry.AddErrorCount(w.chainID, 1)
-		logger.Warn("failed to get latest ledger, retrying", zap.Error(err), zap.Duration("backoff", backoff))
-
-		select {
-		case <-ctx.Done():
-			return 0, ctx.Err()
-		case <-time.After(backoff):
-		}
-
-		if backoff < maxBackoff {
-			backoff *= 2
-			if backoff > maxBackoff {
-				backoff = maxBackoff
-			}
-		}
-	}
-}
-
-// runReobservationHandler handles incoming reobservation requests. Returns an error only on fatal failure.
+// runReobservationHandler serves reobservation requests until ctx is canceled. It panics on a
+// request for another chain.
 func (w *watcher) runReobservationHandler(ctx context.Context) error {
 	logger := w.logger
 	for {
@@ -275,19 +244,10 @@ func (w *watcher) runReobservationHandler(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case req := <-w.obsvReqC:
-			if req.ChainId > math.MaxUint16 {
-				logger.Debug("ignoring reobservation request for invalid chain",
-					zap.Uint32("requestChainId", req.ChainId),
-					zap.String("watcherChainId", w.chainID.String()),
-				)
-				continue
-			}
-			if vaa.ChainID(req.ChainId) != w.chainID {
-				logger.Debug("ignoring reobservation request for different chain",
-					zap.Uint32("requestChainId", req.ChainId),
-					zap.String("watcherChainId", w.chainID.String()),
-				)
-				continue
+			// node/pkg/node/reobserve.go sends only this chain's requests here, so a mismatch
+			// is a bug in the node's channel setup.
+			if req.ChainId > math.MaxUint16 || vaa.ChainID(req.ChainId) != w.chainID {
+				panic("invalid chain ID")
 			}
 
 			txHash := hex.EncodeToString(req.TxHash)
@@ -295,6 +255,7 @@ func (w *watcher) runReobservationHandler(ctx context.Context) error {
 
 			count, err := w.handleReobservationRequest(ctx, txHash, w.rpc, w.httpClient)
 			if err != nil {
+				p2p.DefaultRegistry.AddErrorCount(w.chainID, 1)
 				logger.Error("failed to handle reobservation request",
 					zap.String("txHash", txHash),
 					zap.Error(err),
@@ -349,26 +310,32 @@ func (w *watcher) handleReobservationRequest(ctx context.Context, txHash, rpcURL
 
 	ledger := gjson.GetBytes(*txRes, "ledger").Uint()
 
-	// Query events starting from the transaction's ledger.
+	// A tx's events are all in its own ledger, so page from that ledger until a page ends past it.
+	pagination := map[string]any{"limit": w.maxPerPoll}
 	params := map[string]any{
 		"startLedger": ledger,
 		"filters": []map[string]any{
 			{"type": "contract", "contractIds": []string{w.contract}},
 		},
-		"pagination": map[string]any{"limit": w.maxPerPoll},
+		"pagination": pagination,
 	}
-	res, err := rpcCall(ctx, "getEvents", params, rpcURL, httpClient)
-	if err != nil {
-		return 0, fmt.Errorf("getEvents failed: %w", err)
-	}
-
-	events := gjson.GetBytes(*res, "events")
-	if !events.Exists() {
-		return 0, nil
+	var events []gjson.Result
+	for {
+		res, err := rpcCall(ctx, "getEvents", params, rpcURL, httpClient)
+		if err != nil {
+			return 0, fmt.Errorf("getEvents failed: %w", err)
+		}
+		page := gjson.GetBytes(*res, "events").Array()
+		events = append(events, page...)
+		if len(page) < w.maxPerPoll || page[len(page)-1].Get("ledger").Uint() > ledger {
+			break
+		}
+		delete(params, "startLedger") // getEvents rejects startLedger together with a cursor
+		pagination["cursor"] = page[len(page)-1].Get("id").Str
 	}
 
 	var messagesFound uint32
-	for _, e := range events.Array() {
+	for _, e := range events {
 		if e.Get("txHash").Str != txHash {
 			continue
 		}
@@ -442,6 +409,9 @@ func rpcCall(ctx context.Context, method string, params any, rpcURL string, http
 	if rr.Error != nil {
 		return nil, fmt.Errorf("jsonrpc error %d: %s", rr.Error.Code, rr.Error.Message)
 	}
+	if rr.Result == nil {
+		return nil, fmt.Errorf("jsonrpc: missing result")
+	}
 	return rr.Result, nil
 }
 
@@ -461,6 +431,7 @@ func (w *watcher) getLatestLedger(ctx context.Context) (uint64, error) {
 func (w *watcher) pollOnce(ctx context.Context, logger *zap.Logger) (bool, error) {
 	advanced := false
 	cursor := ""
+	var lastLedger uint64
 
 	for {
 		pagination := map[string]any{
@@ -503,6 +474,7 @@ func (w *watcher) pollOnce(ctx context.Context, logger *zap.Logger) (bool, error
 			cursor = e.Get("id").Str
 
 			ledger := e.Get("ledger").Uint()
+			lastLedger = ledger
 
 			mp := w.messageFromEvent(e, false)
 			if mp == nil {
@@ -519,22 +491,22 @@ func (w *watcher) pollOnce(ctx context.Context, logger *zap.Logger) (bool, error
 			case <-ctx.Done():
 				return advanced, ctx.Err()
 			}
-
-			if ledger >= w.nextLedger {
-				w.nextLedger = ledger + 1
-				advanced = true
-			}
 		}
 
 		if len(events) < w.maxPerPoll {
 			// Received fewer events than the limit — no more pages.
-			if !advanced && latestLedger > w.nextLedger {
+			if lastLedger > 0 {
+				w.nextLedger = lastLedger + 1
+				advanced = true
+			} else if latestLedger > w.nextLedger {
 				w.nextLedger = latestLedger
 				advanced = true
 			}
 			break
 		}
 		// Received exactly maxPerPoll events — there may be more pages; continue with cursor.
+		// The next page may continue lastLedger, so if it fails the next poll restarts at lastLedger.
+		w.nextLedger = lastLedger
 	}
 
 	return advanced, nil
