@@ -23,11 +23,11 @@ import (
 	"github.com/certusone/wormhole/node/pkg/readiness"
 	"github.com/certusone/wormhole/node/pkg/supervisor"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/tidwall/gjson"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	"go.uber.org/zap"
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
 )
 
 // ReadLimitSize can be used to increase the read limit size on the listening connection. The default read limit size is not large enough,
@@ -221,7 +221,7 @@ func (e *Watcher) Run(ctx context.Context) error {
 				blocksBody, err := common.SafeRead(resp.Body)
 				if err != nil {
 					logger.Error("query latest block response read error", zap.String("network", e.networkName), zap.Error(err))
-					errC <- err //nolint:channelcheck // The watcher will exit anyway
+					errC <- err // Note on channel capacity: The watcher will exit anyway
 					resp.Body.Close()
 					continue
 				}
@@ -302,7 +302,7 @@ func (e *Watcher) Run(ctx context.Context) error {
 				msgs := EventsToMessagePublications(e.contract, txHash, events.Array(), logger, e.chainID, contractAddressLogKey, e.b64Encoded)
 				for _, msg := range msgs {
 					msg.IsReobservation = true
-					e.msgC <- msg //nolint:channelcheck // The channel to the processor is buffered and shared across chains, if it backs up we should stop processing new observations
+					e.msgC <- msg // Note on channel capacity: The channel to the processor is buffered and shared across chains, if it backs up we should stop processing new observations
 					messagesConfirmed.WithLabelValues(e.networkName).Inc()
 					watchers.ReobservationsByChain.WithLabelValues(e.networkName, "std").Inc()
 				}
@@ -321,7 +321,7 @@ func (e *Watcher) Run(ctx context.Context) error {
 					p2p.DefaultRegistry.AddErrorCount(e.chainID, 1)
 					connectionErrors.WithLabelValues(e.networkName, "channel_read_error").Inc()
 					logger.Error("error reading channel", zap.String("network", e.networkName), zap.Error(err))
-					errC <- err //nolint:channelcheck // The watcher will exit anyway
+					errC <- err // Note on channel capacity: The watcher will exit anyway
 					return nil
 				}
 
@@ -343,7 +343,7 @@ func (e *Watcher) Run(ctx context.Context) error {
 
 				msgs := EventsToMessagePublications(e.contract, txHash, events.Array(), logger, e.chainID, e.contractAddressLogKey, e.b64Encoded)
 				for _, msg := range msgs {
-					e.msgC <- msg //nolint:channelcheck // The channel to the processor is buffered and shared across chains, if it backs up we should stop processing new observations
+					e.msgC <- msg // Note on channel capacity: The channel to the processor is buffered and shared across chains, if it backs up we should stop processing new observations
 					messagesConfirmed.WithLabelValues(e.networkName).Inc()
 				}
 
@@ -580,9 +580,14 @@ func EventsToMessagePublications(contract string, txHash string, events []gjson.
 			logger.Error("sequence cannot be parsed as int", zap.String("network", networkName), zap.String("tx_hash", txHash), zap.String("value", sequence))
 			continue
 		}
+		timestamp, err := vaa.TimeFromUnix(blockTimeInt)
+		if err != nil {
+			logger.Error("blocktime is outside the supported VAA timestamp range", zap.String("network", networkName), zap.String("tx_hash", txHash), zap.String("value", blockTime), zap.Error(err))
+			continue
+		}
 		messagePublication := &common.MessagePublication{
 			TxID:             txHashValue.Bytes(),
-			Timestamp:        time.Unix(blockTimeInt, 0),
+			Timestamp:        timestamp,
 			Nonce:            uint32(nonceInt),
 			Sequence:         sequenceInt,
 			EmitterChain:     watcherChainID, // SECURITY: Must not be user controllable

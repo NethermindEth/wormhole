@@ -3,8 +3,22 @@
     "^@certusone/(.*)/lib/esm/(.*)$": "@certusone/$1/lib/cjs/$2"
   },
   "transform": {
-    "^.+\\.(t|j)sx?$": "ts-jest"
+    "^.+\\.(mjs|tsx?|jsx?)$": [
+      "ts-jest",
+      {
+        "isolatedModules": true,
+        "tsconfig": {
+          "module": "commonjs",
+          "moduleResolution": "node",
+          "esModuleInterop": true,
+          "allowJs": true
+        }
+      }
+    ]
   },
+  "transformIgnorePatterns": [
+    "node_modules/(?!(@wormhole-foundation|@solana/web3\\.js|@mysten|@scure|@noble|@injectivelabs|uuid)/)"
+  ],
   "testRegex": "(/__tests__/.*|(\\.|/)(test|spec))\\.(jsx?|tsx?)$",
   "testPathIgnorePatterns": ["__tests__/utils"],
   "moduleFileExtensions": ["ts", "tsx", "js", "jsx", "json", "node"],

@@ -1,5 +1,5 @@
 import { parseTokenBridgeRegisterChainVaa } from "@certusone/wormhole-sdk/lib/esm/vaa/tokenBridge";
-import { SuiClient } from "@mysten/sui/client";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Transaction } from "@mysten/sui/transactions";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -28,7 +28,7 @@ import {
 import { YargsAddCommandsFn } from "../Yargs";
 import { deploy } from "./deploy";
 import { initExampleApp, initTokenBridge, initWormhole } from "./init";
-import { Chain, chainIdToChain, toChainId } from "@wormhole-foundation/sdk";
+import { CliChain, cliChainIdToChain } from "../../utils";
 
 export const addSetupCommands: YargsAddCommandsFn = (y: typeof yargs) =>
   y.command(
@@ -194,14 +194,14 @@ export const addSetupCommands: YargsAddCommandsFn = (y: typeof yargs) =>
 
       const tx = new Transaction();
       setMaxGasBudgetDevnet("Devnet", tx);
-      const registrations: { chain: Chain; module: string }[] = [];
+      const registrations: { chain: CliChain; module: string }[] = [];
       for (const key in process.env) {
         if (/^REGISTER_(.+)_TOKEN_BRIDGE_VAA$/.test(key)) {
           // Get VAA info
           const vaa = Buffer.from(String(process.env[key]), "hex");
           const { foreignChain, module } =
             parseTokenBridgeRegisterChainVaa(vaa);
-          const chain = chainIdToChain(toChainId(foreignChain));
+          const chain = cliChainIdToChain(foreignChain);
           registrations.push({ chain, module });
 
           // Register
@@ -233,9 +233,15 @@ export const addSetupCommands: YargsAddCommandsFn = (y: typeof yargs) =>
   );
 
 const getEmitterCapObjectId = async (
-  client: SuiClient,
+  client: SuiGrpcClient,
   tokenBridgeStateObjectId: string
 ): Promise<string> => {
   const fields = await getObjectFields(client, tokenBridgeStateObjectId);
-  return fields?.emitter_cap?.fields?.id?.id;
+  const emitterCapObjectId = fields?.emitter_cap?.id;
+  if (typeof emitterCapObjectId !== "string") {
+    throw new Error(
+      `Couldn't find emitter cap ID on token bridge state ${tokenBridgeStateObjectId}`
+    );
+  }
+  return emitterCapObjectId;
 };

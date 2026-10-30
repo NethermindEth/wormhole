@@ -39,11 +39,13 @@
 /wormchain/devnet/ @evan-gray
 /wormchain/devnet/txverifier @djb15 @johnsaigle @mdulin2 @pleasew8t
 /wormchain/ts-sdk/ @evan-gray @kev1n-peters @panoel
+/linters/ @djb15 @johnsaigle @mdulin2 @pleasew8t @bemic
+/codeql/ @djb15 @johnsaigle @mdulin2 @pleasew8t @bemic
 
 # Protobuf for node
 
-/proto/node/ @evan-gray @panoel
-/proto/publicrpc/ @evan-gray @panoel
+/proto/node/ @evan-gray @panoel @jmgilman
+/proto/publicrpc/ @evan-gray @panoel @jmgilman
 
 # Makefile
 
@@ -68,7 +70,7 @@
 
 ## DB
 
-/node/pkg/db/ @evan-gray @panoel
+/node/pkg/db/ @evan-gray @panoel @jmgilman
 /node/pkg/db/notary* @djb15 @johnsaigle @mdulin2 @pleasew8t
 
 ## Accountant
@@ -77,7 +79,7 @@
 
 ## Alternate Publisher
 
-/node/pkg/altpub/ @evan-gray @panoel
+/node/pkg/altpub/ @evan-gray @panoel @jmgilman
 
 ## Governor
 
@@ -89,7 +91,7 @@
 
 ## Gateway Relayer
 
-/node/pkg/gwrelayer/ @evan-gray @panoel
+/node/pkg/gwrelayer/ @evan-gray @panoel @jmgilman
 
 ## P2P
 
@@ -108,7 +110,7 @@
 
 ## Proto
 
-/node/pkg/proto/ @evan-gray @panoel
+/node/pkg/proto/ @evan-gray @panoel @jmgilman
 
 ## Query
 
@@ -116,11 +118,11 @@
 
 ## Public RPC
 
-/node/pkg/publicrpc/ @evan-gray @panoel
+/node/pkg/publicrpc/ @evan-gray @panoel @jmgilman
 
 ## Supervisor Framework
 
-/node/pkg/supervisor/ @evan-gray @panoel
+/node/pkg/supervisor/ @evan-gray @panoel @jmgilman
 
 ## Transfer Verifier
 
@@ -131,9 +133,15 @@
 
 /node/pkg/watchers @evan-gray @panoel @djb15 @johnsaigle @mdulin2 @pleasew8t
 
-## Guardian Dependency Upgrades (go.mod) 
+## Suiclient
+
+/node/pkg/suiclient @djb15 @mdulin2 @pleasew8t
+
+## Guardian Dependency Upgrades (go.mod + go.sum)
 /node/go.mod @djb15 @johnsaigle @mdulin2 @pleasew8t @bemic
+/node/go.sum @djb15 @johnsaigle @mdulin2 @pleasew8t @bemic
 /sdk/go.mod @djb15 @johnsaigle @mdulin2 @pleasew8t @bemic
+/sdk/go.sum @djb15 @johnsaigle @mdulin2 @pleasew8t @bemic
 
 ## Node (package)
 
@@ -180,8 +188,12 @@ scripts/coverage-check @evan-gray @kcsongor @johnsaigle @mdulin2 @pleasew8t @bem
 /whitepapers/ @evan-gray @kcsongor @panoel @djb15 @SEJeff @johnsaigle @mdulin2 @pleasew8t @bemic
 
 ## Tests
+/node/pkg/testutils/ @evan-gray @kcsongor @panoel @djb15 @SEJeff @johnsaigle @mdulin2 @pleasew8t @bemic
 *_test.go @evan-gray @kcsongor @panoel @djb15 @SEJeff @johnsaigle @mdulin2 @pleasew8t @bemic
 
 ## CI
 .golangci.yml @evan-gray @djb15 @johnsaigle @mdulin2
 cspell* @evan-gray @kcsongor @panoel @djb15 @SEJeff @johnsaigle @mdulin2 @pleasew8t @bemic
+
+## OSS Scanner
+.oss-scanner/ @djb15 @bemic @pleasew8t @johnsaigle @mdulin2

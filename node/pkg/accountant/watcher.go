@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"time"
 
 	"github.com/certusone/wormhole/node/pkg/common"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
@@ -62,7 +61,7 @@ func (acct *Accountant) watcher(ctx context.Context, isNTT bool) error {
 		ctx,
 		"guardiand",
 		query,
-		64, // channel capacity
+		1000, // channel capacity
 	)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to %s events: %w", tag, err)
@@ -177,10 +176,9 @@ func (acct *Accountant) processPendingTransfer(xfer *WasmObservation, tag string
 		zap.Uint8("consistency_level", xfer.ConsistencyLevel),
 		zap.String("payload", hex.EncodeToString(xfer.Payload)),
 	)
-
 	msg := &common.MessagePublication{
 		TxID:             xfer.TxHash,
-		Timestamp:        time.Unix(int64(xfer.Timestamp), 0),
+		Timestamp:        vaa.TimeFromUnixUint32(xfer.Timestamp),
 		Nonce:            xfer.Nonce,
 		Sequence:         xfer.Sequence,
 		EmitterChain:     vaa.ChainID(xfer.EmitterChain),
@@ -211,7 +209,8 @@ func (acct *Accountant) processPendingTransfer(xfer *WasmObservation, tag string
 		acct.publishTransferAlreadyLocked(pe)
 		transfersApproved.Inc()
 	} else {
-		// TODO: We could issue a reobservation request here since it looks like other guardians have seen this transfer but we haven't.
+		// This log will be emitted by the Guardians that submit to the Accountant after the transfer has already been confirmed.
+		// These transfers are already processed in submit_obs.go and so when the watcher sees the event it is no longer in the pendingTransfers map.
 		acct.logger.Info("acctwatch: unknown transfer has been approved, ignoring it", zap.String("msgId", msgId))
 	}
 }

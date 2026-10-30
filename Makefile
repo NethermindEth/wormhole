@@ -53,11 +53,25 @@ $(BIN)/guardiand: dirs generate
 	  github.com/certusone/wormhole/node
 
 .PHONY: test-coverage
-## Run tests with coverage for node and sdk (matches CI)
+## Run tests with coverage for node, and sdk
 test-coverage:
-	@echo "Running tests with coverage for node and sdk..."
+	@echo "Running tests with coverage for node, and sdk..."
 	@set -o pipefail && (cd node && go test -count=1 -v -timeout 5m -race -cover ./...) 2>&1 | tee coverage.txt
 	@set -o pipefail && (cd sdk && go test -count=1 -v -timeout 5m -race -cover ./...) 2>&1 | tee -a coverage.txt
+
+.PHONY: test-integration-compile
+## Compile integration-tagged Go tests without running live integration tests
+# /usr/bin/true replaces test-binary execution, while go test still compiles every selected package and test.
+test-integration-compile:
+	@cd node && go test -tags integration -exec /usr/bin/true ./...
+	@cd sdk && go test -tags integration -exec /usr/bin/true ./...
+
+.PHONY: test-fast
+## Run fast tests for node and sdk, skipping tests gated by testing.Short() and fuzz smoke tests
+test-fast:
+	@echo "Running fast tests for node and sdk..."
+	@cd node && go test -short ./...
+	@cd sdk && go test -short ./...
 
 .PHONY: check-coverage
 ## Check coverage against baseline (run tests first)

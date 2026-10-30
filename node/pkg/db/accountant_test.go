@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/certusone/wormhole/node/pkg/common"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
+
+	"github.com/certusone/wormhole/node/pkg/common"
+	"github.com/certusone/wormhole/node/pkg/testutils"
 
 	"github.com/dgraph-io/badger/v3"
 	eth_common "github.com/ethereum/go-ethereum/common"
@@ -23,12 +25,14 @@ import (
 )
 
 func TestAcctPendingTransferMsgID(t *testing.T) {
+	t.Parallel()
+
 	tokenBridgeAddr, err := vaa.StringToAddress("0x0290fb167208af455bb137780163b7b7a9a10c16")
 	require.NoError(t, err)
 
 	msg1 := &common.MessagePublication{
 		TxID:             eth_common.HexToHash("0x06f541f5ecfc43407c31587aa6ac3a689e8960f36dc23c332db5510dfc6a4063").Bytes(),
-		Timestamp:        time.Unix(int64(1654516425), 0),
+		Timestamp:        testutils.MustTimeFromUnix(t, 1654516425),
 		Nonce:            123456,
 		Sequence:         789101112131415,
 		EmitterChain:     vaa.ChainIDEthereum,
@@ -42,6 +46,8 @@ func TestAcctPendingTransferMsgID(t *testing.T) {
 }
 
 func TestAcctIsPendingTransfer(t *testing.T) {
+	t.Parallel()
+
 	assert.Equal(t, true, acctIsPendingTransfer([]byte("ACCT:PXFER3:"+"2/0000000000000000000000000290fb167208af455bb137780163b7b7a9a10c16/789101112131415")))
 	assert.Equal(t, false, acctIsPendingTransfer([]byte("ACCT:PXFER3:")))
 	assert.Equal(t, false, acctIsPendingTransfer([]byte("ACCT:PXFER3:1")))
@@ -56,6 +62,8 @@ func TestAcctIsPendingTransfer(t *testing.T) {
 }
 
 func TestAcctStoreAndDeletePendingTransfers(t *testing.T) {
+	t.Parallel()
+
 	dbPath := t.TempDir()
 	db := OpenDb(zap.NewNop(), &dbPath)
 	defer db.Close()
@@ -65,7 +73,7 @@ func TestAcctStoreAndDeletePendingTransfers(t *testing.T) {
 
 	msg1 := &common.MessagePublication{
 		TxID:             eth_common.HexToHash("0x06f541f5ecfc43407c31587aa6ac3a689e8960f36dc23c332db5510dfc6a4063").Bytes(),
-		Timestamp:        time.Unix(int64(1654516425), 0),
+		Timestamp:        testutils.MustTimeFromUnix(t, 1654516425),
 		Nonce:            123456,
 		Sequence:         789101112131415,
 		EmitterChain:     vaa.ChainIDEthereum,
@@ -76,7 +84,7 @@ func TestAcctStoreAndDeletePendingTransfers(t *testing.T) {
 
 	msg2 := &common.MessagePublication{
 		TxID:             eth_common.HexToHash("0x06f541f5ecfc43407c31587aa6ac3a689e8960f36dc23c332db5510dfc6a4064").Bytes(),
-		Timestamp:        time.Unix(int64(1654516425), 0),
+		Timestamp:        testutils.MustTimeFromUnix(t, 1654516425),
 		Nonce:            123457,
 		Sequence:         789101112131416,
 		EmitterChain:     vaa.ChainIDEthereum,
@@ -104,7 +112,7 @@ func TestAcctStoreAndDeletePendingTransfers(t *testing.T) {
 	// Delete something that doesn't exist.
 	msg3 := &common.MessagePublication{
 		TxID:             eth_common.HexToHash("0x06f541f5ecfc43407c31587aa6ac3a689e8960f36dc23c332db5510dfc6a4064").Bytes(),
-		Timestamp:        time.Unix(int64(1654516425), 0),
+		Timestamp:        testutils.MustTimeFromUnix(t, 1654516425),
 		Nonce:            123457,
 		Sequence:         789101112131417,
 		EmitterChain:     vaa.ChainIDEthereum,
@@ -119,6 +127,8 @@ func TestAcctStoreAndDeletePendingTransfers(t *testing.T) {
 }
 
 func TestAcctGetEmptyData(t *testing.T) {
+	t.Parallel()
+
 	logger := zap.NewNop()
 	dbPath := t.TempDir()
 	db := OpenDb(logger, &dbPath)
@@ -130,6 +140,8 @@ func TestAcctGetEmptyData(t *testing.T) {
 }
 
 func TestAcctGetData(t *testing.T) {
+	t.Parallel()
+
 	logger := zap.NewNop()
 	dbPath := t.TempDir()
 	db := OpenDb(logger, &dbPath)
@@ -151,7 +163,7 @@ func TestAcctGetData(t *testing.T) {
 
 	msg1 := &common.MessagePublication{
 		TxID:             eth_common.HexToHash("0x06f541f5ecfc43407c31587aa6ac3a689e8960f36dc23c332db5510dfc6a4063").Bytes(),
-		Timestamp:        time.Unix(int64(1654516425), 0),
+		Timestamp:        testutils.MustTimeFromUnix(t, 1654516425),
 		Nonce:            123456,
 		Sequence:         789101112131415,
 		EmitterChain:     vaa.ChainIDEthereum,
@@ -162,7 +174,7 @@ func TestAcctGetData(t *testing.T) {
 
 	msg2 := &common.MessagePublication{
 		TxID:             eth_common.HexToHash("0x06f541f5ecfc43407c31587aa6ac3a689e8960f36dc23c332db5510dfc6a4064").Bytes(),
-		Timestamp:        time.Unix(int64(1654516425), 0),
+		Timestamp:        testutils.MustTimeFromUnix(t, 1654516425),
 		Nonce:            123457,
 		Sequence:         789101112131416,
 		EmitterChain:     vaa.ChainIDEthereum,
@@ -194,6 +206,8 @@ func TestAcctGetData(t *testing.T) {
 }
 
 func TestAcctLoadingWhereOldPendingGetsUpdated(t *testing.T) {
+	t.Parallel()
+
 	dbPath := t.TempDir()
 	db := OpenDb(zap.NewNop(), &dbPath)
 	defer db.Close()
@@ -325,6 +339,8 @@ func (msg *OldMessagePublication) MessageIDString() string {
 }
 
 func TestUnmarshalOldJSON(t *testing.T) {
+	t.Parallel()
+
 	jsn := `
 	{
 	  "TxID": "SGVsbG8=",

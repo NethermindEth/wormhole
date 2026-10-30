@@ -6,6 +6,25 @@ appreciated and will be reviewed swiftly.
 Wormhole is a mission-critical, high-stakes project. We optimize for quality over quantity. Design processes
 and code reviews are our most important tools to accomplish that.
 
+## Who can contribute?
+
+Due to the high-stakes nature of making changes to Wormhole, we have a strict policy on who can contribute to the project.
+Typically, we only accept contributions from people who we already trust and/or who have a history of contributing to
+the project. This policy is in place to ensure that we maintain the security and stability of project, including
+its CI infrastructure.
+
+The right way to get started with contributing is to reach out to us directly, introduce yourself, and ask for guidance on how to contribute to the project.
+Drive-by pull requests will be closed without review or explanation. Typically, we already have a good visibility into
+existing bugs and feature requests, and our preference to to have our own developers and their LLMs implement the changes.
+
+In general, we will not upstream changes to the project unless we have a tangible need for them.
+
+Security-related issues **must** be reported via our bug bounty program. See [SECURITY.md](./SECURITY.md) for more information.
+We do not accept security-related PRs from external contributors, including from bug bounty reporters, regardless of whether
+or not the reporter has found a valid issue.
+
+The above policy applies to all projects in the Wormhole ecosystem maintained by the Wormhole Foundation.
+
 ## Development and Code Review Process
 
 **Before contributing code, read [SAFETY_CRITICAL_CODE.md](./SAFETY_CRITICAL_CODE.md).**
@@ -13,23 +32,29 @@ and code reviews are our most important tools to accomplish that.
 - All new features must first be discussed in a GitHub issue before starting to implement them. For
   complex features, it can be useful to open a thread on [GitHub Discussions](https://github.com/wormhole-foundation/wormhole/discussions).
 
-- Development happens on a long-lived development branch (`main` and `dev.v1`).
+- Development happens on a long-lived development branch (`main`).
   Every change going into a development branch is reviewed individually (see below). Release branches may be used
   to support in-the-wild releases of Wormhole. We aim to support at most two release
   branches at the same time. Changes can be cherry-picked from the development branch to release branches, but
   never from release branches to a development branch.
+
 - Releases are first tested on a testnet.
 
 - Commits should be small and have a meaningful commit message. One commit should, roughly, be "one idea" and
   be as atomic as possible. A feature can consist of many such commits.
+
 - Where possible, use standard libraries, common dependencies, or SDK functions instead of re-implementing validation
 from scratch. This helps prevent duplication and drift for routine tasks, and helps the codebase stay lean and well-tested.
+
 - Feature flags and interface evolution are better than breaking changes and long-lived feature branches.
+
 - We optimize for reading, not for writing - over its lifetime, code is read much more often than written.
   Small commits, meaningful commit messages and useful comments make it easier to review code and improve the
   quality of code review as well as review turnaround times. It's much easier to spot mistakes in small,
   well-defined changes.
+
 - PRs that only correct typos or make minor wording adjustments will be rejected. Fixing typos alongside other non-trivial engineering work is welcome.
+
 - Pull requests that modify dependencies must be well-documented so that the benefits of updating can be weighed against
   security and compatibility concerns. Low-effort PRs that update dependencies without any documentation will be rejected.
 
@@ -229,6 +254,35 @@ Places to find out more about existing test coverage and how to run those tests:
   - Run: `cd algorand && make test`
 
 The best place to understand how we invoke these tests via GitHub Actions on every commit can be found via `./.github/workflows/*.yml` and the best place to observe the results of these builds can be found via [https://github.com/wormhole-foundation/wormhole/actions](https://github.com/wormhole-foundation/wormhole/actions).
+
+### Writing Tests
+
+Tests should be written to be extensible and to cover as much of the expected behavior as possible, especially failure cases.
+Tests added to the repo are expected to prove their error cases, not just the happy path.
+
+Where possible, real example data should be used as the test input rather than hand-crafted data. For example,
+a real RPC response with on-chain can be saved in-line and tested against a parser.
+
+For Go specifically:
+- Use [table-driven tests](https://go.dev/wiki/TableDrivenTests#example-of-a-table-driven-test) to test multiple inputs in an extensible way.
+- Be intentional when using require vs assert. 
+  - Require halts the test and hides all subsequent logging, whereas multiple failing asserts will be logged.
+  - So, require should be used carefully for setting up e.g. a mock or a test database that is required for the test to run. Asserts should be used for checking actual properties and business logic.
+- Use `t.Parallel()` for tests that can safely be run in parallel.
+- Use `testing.Short()` to gate  tests that are more integration-like or that otherwise are slow.
+- Use `t.Helper()` for any utility/helper functions that are not themselves explicitly tests that you do not want to see in the error traceback.
+
+### Writing Fuzz Tests
+
+Be mindful of opportunities to include fuzz tests for new work. Complex interactions between different components of the Guardian, or even single features that accept many different permutations of input, can be good candidates for fuzzing. In addition to the general testing guidelines above, consider the following when writing fuzzers:
+
+- Fuzzers must be defined as `func Fuzz*` and live in `_test.go` files.
+- Consider seeding the fuzzer using `f.Add()` with a few edge cases and/or legitimate inputs. This not only gives the fuzzer a good seed corpus, but also ensures the fuzzer can be run as a normal test.
+
+### Unit tests anti-patterns
+
+- Hard-coded sleeps
+- Live, external network calls
 
 ### Code Coverage
 

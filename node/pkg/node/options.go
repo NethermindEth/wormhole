@@ -169,7 +169,7 @@ func GuardianOptionQueryHandler(ccqEnabled bool, allowedRequesters string) *Guar
 		}}
 }
 
-// GuardianOptionNoAccountant disables the accountant. It is a shorthand for GuardianOptionAccountant("", "", false, nil)
+// GuardianOptionNoAccountant disables the accountant.
 // Dependencies: none
 func GuardianOptionNoAccountant() *GuardianOption {
 	return &GuardianOption{
@@ -189,11 +189,16 @@ func GuardianOptionAccountant(
 	wormchainConn *wormconn.ClientConn,
 	nttContract string,
 	nttWormchainConn *wormconn.ClientConn,
+	submitObservationBatchSize int,
 ) *GuardianOption {
 	return &GuardianOption{
 		name:         "accountant",
 		dependencies: []string{"db"},
 		f: func(ctx context.Context, logger *zap.Logger, g *G) error {
+			if submitObservationBatchSize <= 0 {
+				return errors.New("accountantSubmitObservationBatchSize must be greater than zero")
+			}
+
 			// Set up the accountant. If the accountant smart contract is configured, we will instantiate the accountant and VAAs
 			// will be passed to it for processing. It will forward all token bridge transfers to the accountant contract.
 			// If accountantCheckEnabled is set to true, token bridge transfers will not be signed and published until they
@@ -237,6 +242,7 @@ func GuardianOptionAccountant(
 				g.guardianSigner,
 				g.gst,
 				g.acctC.writeC,
+				submitObservationBatchSize,
 				g.env,
 			)
 
@@ -454,7 +460,7 @@ func GuardianOptionWatchers(watcherConfigs []watchers.WatcherConfig, ibcWatcherC
 									zap.String("txID", msg.TxIDString()),
 									zap.Time("timestamp", msg.Timestamp))
 							} else {
-								g.msgC.writeC <- msg //nolint:channelcheck // The channel to the processor is buffered and shared across chains, if it backs up we should stop processing new observations
+								g.msgC.writeC <- msg // Note on channel capacity: The channel to the processor is buffered and shared across chains, if it backs up we should stop processing new observations
 							}
 						}
 					}
@@ -480,7 +486,7 @@ func GuardianOptionWatchers(watcherConfigs []watchers.WatcherConfig, ibcWatcherC
 									zap.Stringer("watcherChainId", chainId),
 								)
 							}
-							g.queryResponseC.writeC <- response //nolint:channelcheck // This channel is buffered, if it backs up we'll stop processing queries until it clears
+							g.queryResponseC.writeC <- response // Note on channel capacity: This channel is buffered, if it backs up we'll stop processing queries until it clears
 						}
 					}
 				}(chainQueryResponseC[chainId], chainId)
@@ -564,7 +570,7 @@ func GuardianOptionWatchers(watcherConfigs []watchers.WatcherConfig, ibcWatcherC
 // GuardianOptionAdminService enables the admin rpc service on a unix socket.
 // Dependencies: db
 // Note: governor and notary are optional - they may be nil if not enabled
-func GuardianOptionAdminService(socketPath string, ethRpc *string, ethContract *string, rpcMap map[string]string) *GuardianOption {
+func GuardianOptionAdminService(socketPath string, rpcMap map[string]string) *GuardianOption {
 	return &GuardianOption{
 		name:         "admin-service",
 		dependencies: []string{"db"},
@@ -581,9 +587,6 @@ func GuardianOptionAdminService(socketPath string, ethRpc *string, ethContract *
 				g.gst,
 				g.gov,
 				g.notary,
-				g.guardianSigner,
-				ethRpc,
-				ethContract,
 				rpcMap,
 				g.reobservers,
 				g.managerService,

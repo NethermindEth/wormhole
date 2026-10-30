@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/certusone/wormhole/node/pkg/common"
 	"github.com/certusone/wormhole/node/pkg/watchers"
@@ -235,10 +234,15 @@ func (e *Watcher) processWormholeLog(logger *zap.Logger, _ context.Context, job 
 
 	// SECURITY the timestamp of an observation is the timestamp of the block in which the wormhole core receipt has been finalized.
 	ts := outcomeBlockHeader.Timestamp
+	timestamp, err := vaa.TimeFromUnix(ts)
+	if err != nil {
+		return fmt.Errorf("invalid block timestamp for tx %s (block %d, time %d, seq %d): %w",
+			job.txHash, outcomeBlockHeader.Height, ts, pubEvent.Seq, err)
+	}
 
 	observation := &common.MessagePublication{
 		TxID:             txHashEthFormat.Bytes(),
-		Timestamp:        time.Unix(int64(ts), 0), // #nosec G115 -- This conversion is safe indefinitely
+		Timestamp:        timestamp,
 		Nonce:            pubEvent.Nonce,
 		Sequence:         pubEvent.Seq,
 		EmitterChain:     vaa.ChainIDNear,
@@ -256,7 +260,7 @@ func (e *Watcher) processWormholeLog(logger *zap.Logger, _ context.Context, job 
 	// tell everyone about it
 	job.hasWormholeMsg = true
 
-	e.eventChan <- EVENT_NEAR_MESSAGE_CONFIRMED //nolint:channelcheck // Only pauses this watcher
+	e.eventChan <- EVENT_NEAR_MESSAGE_CONFIRMED // Note on channel capacity: Only pauses this watcher
 
 	logger.Info("message observed",
 		zap.String("log_msg_type", "wormhole_event_success"),
@@ -270,7 +274,7 @@ func (e *Watcher) processWormholeLog(logger *zap.Logger, _ context.Context, job 
 		zap.Uint8("consistency_level", observation.ConsistencyLevel),
 	)
 
-	e.msgC <- observation //nolint:channelcheck // The channel to the processor is buffered and shared across chains, if it backs up we should stop processing new observations
+	e.msgC <- observation // Note on channel capacity: The channel to the processor is buffered and shared across chains, if it backs up we should stop processing new observations
 
 	return nil
 }

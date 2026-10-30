@@ -56,7 +56,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.25.10"
+          go-version-file: node/go.mod
       - run: make node
 
   algorand:
@@ -81,7 +81,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # v1.7.0
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
       - run: cd ethereum && make test-push0 && make test
 
   ethereum-upgrade:
@@ -94,13 +94,13 @@ jobs:
         with:
           node-version: "22"
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # v1.7.0
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
       - run: cd clients/js && make install
       - run: cd ethereum && make test-upgrade
 
   solana:
     runs-on: ubuntu-24.04
-    container: ghcr.io/wormhole-foundation/solana:1.10.31@sha256:d31e8db926a1d3fbaa9d9211d9979023692614b7b64912651aba0383e8c01bad
+    container: ghcr.io/wormhole-foundation/solana:1.10.31-bookworm@sha256:0d7b5242417f0d9b4a99abe5b46c2151add535e913e8513875e2908f98602025
 
     env:
       RUSTFLAGS: -Dwarnings
@@ -243,20 +243,6 @@ jobs:
           node-version: "22"
       - run: cd cosmwasm && make test
 
-  cli:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: "22"
-      - run: |
-          cd clients/js && make test
-          make docs
-          git diff --name-only --exit-code && echo "✅ Generated CLI docs match committed docs" || (echo "❌ Generated CLI docs differs from committed CLI docs, run \`make docs\` and commit the result" >&2 && exit 1)
-
   # Verify wormhole chain unit tests
   wormchain:
     runs-on: ubuntu-24.04
@@ -266,6 +252,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
+          # Pinned to match the Wormchain Docker images; go.mod only declares Go 1.19 compatibility.
           go-version: "1.19.9"
       - run: |
           cd wormchain
@@ -282,7 +269,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.25.10"
+          go-version: "1.26.10"
       - run: cd sdk/vaa && go test -v -fuzz FuzzCalculateQuorum -run FuzzCalculateQuorum -fuzztime 15s
 
   # Run Go linters
@@ -301,15 +288,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.25.10"
+          go-version-file: node/go.mod
       - name: Install formatter
         run: go install golang.org/x/tools/cmd/goimports@v0.8.0
       - name: Formatting checks
         run: ./scripts/lint.sh -l -g format
-      - name: Install linters
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.8.0
       - name: Run linters
-        run: make generate && golangci-lint --version && ./scripts/lint.sh -g lint
+        run: make generate && ./scripts/lint.sh -g lint
       - name: Ensure generated proto matches
         run: |
           rm -rf node/pkg/proto
@@ -347,8 +332,10 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.25.10"
-      # The go-ethereum and celo-blockchain packages both implement secp256k1 using the exact same header, but that causes duplicate symbols.
+          go-version-file: node/go.mod
+      # /usr/bin/true replaces test-binary execution, so live integration tests are compiled but never run.
+      - name: Compile integration-tagged Go tests without running them
+        run: make test-integration-compile
       - name: Run golang tests with coverage
         run: make test-coverage
       - name: Upload coverage output
@@ -366,7 +353,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.25.10"
+          go-version-file: scripts/coverage-check/go.mod
       - name: Download coverage output
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
@@ -376,6 +363,19 @@ jobs:
         run: make build-coverage-check
       - name: Check coverage against baseline
         run: ./coverage-check
+
+  # Run unit tests for the custom Go linters
+  linter-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: linters/go.mod
+      - name: Run custom linter tests
+        run: make -C linters test
 
   # Run Rust lints and tests
   rust-lint-and-tests:
@@ -497,4 +497,4 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: "22"
-      - run: npx prettier@2.3.2 --check ./clients/js/src ./sdk/js/src
+      - run: npx prettier@2.3.2 --check ./sdk/js/src

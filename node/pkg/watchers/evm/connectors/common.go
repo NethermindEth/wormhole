@@ -63,6 +63,8 @@ type Connector interface {
 	RawBatchCallContext(ctx context.Context, b []rpc.BatchElem) error
 	Client() *ethClient.Client
 	SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error)
+	// Close releases the underlying rpc.Client and its goroutines.
+	Close()
 }
 
 type PollSubscription struct {
@@ -89,10 +91,25 @@ func (sub *PollSubscription) Err() <-chan error {
 func (sub *PollSubscription) Unsubscribe() {
 	sub.errOnce.Do(func() {
 		select {
-		case sub.quit <- ErrUnsubscribed: //nolint:channelcheck // We only do a single write.
+		case sub.quit <- ErrUnsubscribed: // Note on channel capacity: We only do a single write.
 			<-sub.unsubDone
 		case <-sub.unsubDone:
 		}
 		close(sub.err) // TODO FIXME this violates golang guidelines “Only the sender should close a channel, never the receiver. Sending on a closed channel will cause a panic.”
 	})
+}
+
+// signalUnsubscribed must be called by a poll runnable that returns on its own
+// (e.g. after escalating an error via errC) rather than in response to the
+// consumer's quit signal. Without it, a subsequent Unsubscribe() would send to
+// the buffered quit channel and then block forever on unsubDone, since the
+// runnable has already exited and will never read quit. Because the watcher
+// defers Unsubscribe() before its context cancel (defers are LIFO), that block
+// would also prevent the supervisor from restarting the watcher. The send is
+// non-blocking: unsubDone is buffered and only ever needs a single value.
+func (sub *PollSubscription) signalUnsubscribed() {
+	select {
+	case sub.unsubDone <- struct{}{}: // Note on channel capacity: Buffered; single signal.
+	default:
+	}
 }

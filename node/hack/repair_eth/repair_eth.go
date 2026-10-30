@@ -80,8 +80,8 @@ func usesBlockscout(chainId vaa.ChainID) bool {
 	return false
 }
 
-func getAdminClient(ctx context.Context, addr string) (*grpc.ClientConn, nodev1.NodePrivilegedServiceClient, error) {
-	conn, err := grpc.DialContext(ctx, fmt.Sprintf("unix:///%s", addr), grpc.WithTransportCredentials(insecure.NewCredentials()))
+func getAdminClient(addr string) (*grpc.ClientConn, nodev1.NodePrivilegedServiceClient, error) {
+	conn, err := grpc.NewClient(fmt.Sprintf("unix:///%s", addr), grpc.WithTransportCredentials(insecure.NewCredentials()))
 
 	if err != nil {
 		log.Fatalf("failed to connect to %s: %v", addr, err)
@@ -140,6 +140,7 @@ func getCurrentHeight(chainId vaa.ChainID, ctx context.Context, c *http.Client, 
 	}
 	req = addUserAgent(req)
 
+	// #nosec G704 -- Maintenance script calling hardcoded or config-provided explorer API
 	resp, err := c.Do(req.WithContext(ctx))
 	if err != nil {
 		return 0, fmt.Errorf("failed to get current height: %w", err)
@@ -184,6 +185,7 @@ func getLogs(chainId vaa.ChainID, ctx context.Context, c *http.Client, api, key,
 	}
 	req = addUserAgent(req)
 
+	// #nosec G704 -- Maintenance script calling hardcoded or config-provided explorer API
 	resp, err := c.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get logs: %w", err)
@@ -274,7 +276,7 @@ func main() {
 
 	missingMessages := make(map[eth_common.Address]map[uint64]bool)
 
-	conn, admin, err := getAdminClient(ctx, *adminRPC)
+	conn, admin, err := getAdminClient(*adminRPC)
 	if err != nil {
 		conn.Close()
 		log.Fatalf("failed to get admin client: %v", err)
@@ -487,6 +489,7 @@ func main() {
 					panic(err)
 				}
 				req = addUserAgent(req)
+				// #nosec G704 -- Maintenance script calling hardcoded or config-provided explorer API
 				resp, err := c.Do(req)
 				if err != nil {
 					log.Fatalf("verify: %v", err)
@@ -494,6 +497,7 @@ func main() {
 				defer resp.Body.Close()
 
 				if resp.StatusCode != http.StatusOK {
+					// #nosec G706 -- Logging response status code from trusted API
 					log.Printf("status %d, retrying", resp.StatusCode)
 					time.Sleep(5 * time.Second)
 					continue

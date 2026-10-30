@@ -68,16 +68,30 @@ provided a quorum of the new set are signers. This is the responsibility of cons
 on the destination chain.
 VAAs are bound to a specific guardian set index; cross-set replay is prevented by on-chain validation.
 
-### Multiple Guardian Sets may be active for a short time during a guardian set rotation
+### Multiple Guardian Sets may be active for a short time during a guardian set rotation / Old delegate guardian sets can influence observations for a short time period
 
 **Justification:**
 When rotating Guardian Sets, the old set stays active for a short time in order to prevent bricking
 in-flight transfers.
 
+Delegated Guardian Set updates follow the same transition model: observations already grouped under the previous delegated 
+configuration may complete against that configuration after a rotation or removal, preventing in-flight messages from being stranded.
+
+Governance VAAs are also not impacted by this case. Wormhole contracts differ in how they treat
+governance VAAs signed by a retiring (not yet expired) Guardian Set: some only accept governance
+VAAs from the current set, while more permissive implementations accept them from any active set,
+including a retiring one. The permissive behaviour is not an issue. If a Guardian Set were fully
+compromised, rotating to a new set would not be sufficient to recover, since the compromised set
+could already have issued arbitrary governance actions. The protocol is considered lost at that
+point, so a retiring set retaining governance rights for the duration of the transition window does
+not create any additional risk beyond what is already covered by "Any impact that assumes control
+over a quorum of signing keys as a precondition" above.
+
 ### A malicious Guardian sends a small number of p2p requests with very large size to other Guardians to try to cause DoS
 
 **Justification:**
-libp2p has a 1MB limit per message by default. It's not possible for Guardians to stuff huge amounts of data in a small number of messages. Large numbers of messages are considered volumetric attacks and are out of scope.
+libp2p has a 1MB limit per message by default. It's not possible for Guardians to stuff huge amounts of data in a small 
+number of messages. Large numbers of messages are considered volumetric attacks and are out of scope.
 
 ### Truncation in Governor calculations due to use of floats and rounding
 
@@ -89,6 +103,30 @@ Even with truncation, the Governor's prices are still accurate beyond some
 fractions of a cent. If an attacker tries to subvert the limits
 by sending many transfers of extremely small value to abuse truncation, the gas cost 
 will make this extremely unprofitable.
+
+### Replay protection or database poisoning claims against the Governor and Notary
+
+**Justification:**
+
+The Governor and Notary do not implement replay protection beyond the natural lifecycle of
+when observations, transfers, or related state are stored in their databases. Findings that
+assume additional replay protection should exist outside of that storage lifecycle are out
+of scope.
+
+This also applies to claims that replayed or otherwise malicious messages can permanently
+poison those databases. Delayed and pending messages are periodically processed and removed
+when they become ready, and Governor transfer records are pruned from the database as they
+fall outside the active rate-limit window, including during reload after restart.
+
+We are also aware that a message may be delayed by the Notary and then delayed again by
+the Governor after the Notary releases it. This possible "double delay" is part of the
+current lifecycle when both mechanisms are enabled, not a separate replay-protection issue.
+
+Guardians also have operational tools, including admin commands, to inspect and update
+relevant local database state. If necessary, operators could also perform manual operations
+on the underlying BadgerDB storage directly. Because these entries can be modified or
+removed, database poisoning claims must demonstrate an impact beyond temporary local
+operator intervention.
 
 ### Fee-related vulnerabilities in contracts where fees are disabled in production
 
@@ -167,3 +205,32 @@ Emitting an arbitrary VAA requires a quorum of Guardians to be malicious or comp
 is out of scope per "Any impact that assumes control over a quorum of signing keys as a
 precondition" above. Absent a compromised attestation source, no insufficient attestation
 exists to be promoted by a later threshold reduction.
+
+### PostedVAA accounts can be permissionlessly closed after 30 days, permanently stranding an inbound wrapped token transfer
+
+The Solana core bridge allows anyone to close a `PostedVAA` account (and its associated
+`SignatureSet`) once the VAA has sat unconsumed for the retention period of 30 days. The
+suggested impact is that an inbound wrapped token transfer whose VAA was posted but never
+redeemed on the Token Bridge could have its `PostedVAA` closed by a third party, permanently
+stranding the user's funds.
+
+**Justification:**
+Closing a `PostedVAA` does not destroy the underlying VAA. It only reclaims the rent of an
+on-chain copy of it. The signed VAA is still available from the Guardian network, and the
+transfer has not been redeemed, so the Token Bridge has not recorded it as claimed. As long
+as the Guardian set that signed it is still active, anyone can simply re-run `post_vaa` to
+recreate the account and then complete the transfer as normal.
+
+If the signing Guardian set has expired in the meantime, the transfer is still not stranded.
+The current Guardian set can reobserve the original source-chain transaction and produce a
+fresh VAA for the same transfer, which is then posted and redeemed under the current set.
+Alternatively, if enough Guardians from the expired set remain in the current set, the
+existing signatures form a quorum of the current set and the VAA can be reposted with its
+Guardian set index updated, as described under "Guardian Sets or indices not being signed
+or included directly within a VAAs hashed contents" above.
+
+Posting a VAA and then leaving it unredeemed for a month is also not a realistic usage
+pattern, since the `post_vaa` and `complete_transfer` instructions are normally submitted
+together. Findings that rely on a closed `PostedVAA` must demonstrate that the message can
+no longer be posted or reobserved by any route, rather than assuming closure of the account
+is equivalent to loss of the message.

@@ -203,6 +203,42 @@ func KnownChainIDFromNumber[N number](n N) (ChainID, error) {
 	return ChainIDUnset, fmt.Errorf("no known ChainID for input %d", n)
 }
 
+// TimeFromUnix converts an integer of any signed or unsigned type into a [time.Time], assuming the value
+// represents Unix seconds.
+// This function can be used to convert on-chain values that represent timestamps into Go's Time type.
+// For example, message publication events parsed from a Wormhole core contract might encode the timestamp in a uint64.
+// This function can parse that value into the wire-format value used by a VAA, returning an error if the on-chain value
+// does not represent a valid uint32 timestamp value.
+//
+// Returns an error if the value is negative or exceeds [math.MaxUint32], which
+// is the Wormhole protocol's on-wire timestamp precision. See also [VAA.serializeBody]
+func TimeFromUnix[N number](n N) (time.Time, error) {
+	if n < 0 {
+		return time.Time{}, fmt.Errorf("timestamp cannot be negative but got %d", n)
+	}
+	// Use intermediate uint64 to safely handle conversion and allow comparison with MaxUint32.
+	val := uint64(n)
+	if val > uint64(math.MaxUint32) {
+		return time.Time{}, fmt.Errorf("timestamp must be less than or equal to %d but got %d", math.MaxUint32, n)
+	}
+	return time.Unix(int64(n), 0), nil
+}
+
+// TimeFromUnixUint32 converts a uint32 of Unix seconds into a [time.Time].
+// Unlike [TimeFromUnix], it returns no error: every uint32 is already a valid
+// on-wire Wormhole timestamp (0..math.MaxUint32), so the range checks cannot fail.
+//
+// ANTI-PATTERN: only call this with a value whose type is already uint32. Never
+// convert another type to uint32 to reach this function, e.g.
+// TimeFromUnixUint32(uint32(x)). For a signed value the conversion turns a
+// negative number into a large positive one, and for a wider unsigned value it
+// drops the high bits; either way it silently produces a wrong timestamp and
+// bypasses the validation [TimeFromUnix] performs. For any non-uint32 value,
+// call [TimeFromUnix] and check the error.
+func TimeFromUnixUint32(n uint32) time.Time {
+	return time.Unix(int64(n), 0)
+}
+
 // StringToKnownChainID converts from a string representation of a chain into a ChainID that is registered in the SDK.
 // The argument can be either a numeric string representation of a number or a known chain name such as "solana".
 // Inputs of unknown ChainIDs, including 0, will result in an error.
@@ -352,6 +388,14 @@ const (
 	ChainIDNexus ChainID = 69
 	// ChainIDTron is the ChainID of Tron
 	ChainIDTron ChainID = 70
+	// ChainIDArc is the ChainID of Arc
+	ChainIDArc ChainID = 71
+	// ChainIDRobinhoodChain is the ChainID of Robinhood Chain
+	ChainIDRobinhoodChain ChainID = 72
+	// ChainIDHydration is the ChainID of Hydration
+	ChainIDHydration ChainID = 73
+	// ChainIDElysium is the ChainID of Elysium
+	ChainIDElysium ChainID = 74
 
 	// ChainIDWormchain is the ChainID of Wormchain and is in its own range.
 	ChainIDWormchain ChainID = 3104

@@ -7,16 +7,29 @@ import {
   transferNearFromNear,
   transferTokenFromNear,
 } from "@certusone/wormhole-sdk/lib/esm/token_bridge/transfer";
-import {
-  Chain,
-  chainToChainId,
-  contracts,
-  Network,
-} from "@wormhole-foundation/sdk-base";
-import { tryNativeToUint8Array } from "./sdk/array";
+import { contracts, Network } from "@wormhole-foundation/sdk-base";
+import { toLegacyChainId, tryNativeToUint8Array } from "./sdk/array";
+import { CliChain } from "./utils";
 
 export function keyPairToImplicitAccount(keyPair: KeyPair): string {
   return Buffer.from(keyPair.getPublicKey().data).toString("hex");
+}
+
+// Resolve the NEAR account to act as. If NEAR_ACCOUNT is set, use that named
+// account; otherwise fall back to the implicit account derived from the key.
+// The supplied key must be a full-access key on whichever account is used.
+export function resolveNearAccount(keyPair: KeyPair): string {
+  if (process.env.NEAR_ACCOUNT) {
+    return process.env.NEAR_ACCOUNT;
+  }
+  const implicitAccount = keyPairToImplicitAccount(keyPair);
+  console.warn(
+    `Warning: NEAR_ACCOUNT is not set, falling back to the implicit account derived from your key:\n` +
+      `  ${implicitAccount}\n` +
+      `If your key belongs to a named account (e.g. foo.near), set NEAR_ACCOUNT to that account.\n` +
+      `Otherwise the submission will likely fail with "access key ed25519:... does not exist while viewing".`
+  );
+  return implicitAccount;
 }
 
 export const execute_near = async (
@@ -107,6 +120,8 @@ export const execute_near = async (
         case "AttestMeta":
           console.log("Creating wrapped token");
           break;
+        case "SetPauserAddresses":
+          throw new Error("SetPauserAddresses not supported on near");
         case "TransferWithPayload":
           throw Error("Can't complete payload 3 transfer from CLI");
         default:
@@ -122,7 +137,7 @@ export const execute_near = async (
   }
 
   const keyPair = KeyPair.fromString(key);
-  const deployerAccount = keyPairToImplicitAccount(keyPair);
+  const deployerAccount = resolveNearAccount(keyPair);
   const keyStore = new InMemoryKeyStore();
   keyStore.setKey(networkId, deployerAccount, keyPair);
   const near = await connect({
@@ -162,7 +177,7 @@ export const execute_near = async (
 };
 
 export async function transferNear(
-  dstChain: Chain,
+  dstChain: CliChain,
   dstAddress: string,
   tokenAddress: string,
   amount: string,
@@ -182,7 +197,7 @@ export async function transferNear(
     throw Error(`Unknown token bridge contract on ${network} for NEAR`);
   }
   const keyPair = KeyPair.fromString(key);
-  const deployerAccount = keyPairToImplicitAccount(keyPair);
+  const deployerAccount = resolveNearAccount(keyPair);
   const keyStore = new InMemoryKeyStore();
   keyStore.setKey(networkId, deployerAccount, keyPair);
   const near = await connect({
@@ -198,8 +213,8 @@ export async function transferNear(
       core,
       token_bridge,
       BigInt(amount),
-      tryNativeToUint8Array(dstAddress, chainToChainId(dstChain)),
-      chainToChainId(dstChain),
+      tryNativeToUint8Array(dstAddress, dstChain),
+      toLegacyChainId(dstChain),
       BigInt(0)
     );
     const result = await nearAccount.functionCall(msg);
@@ -212,8 +227,8 @@ export async function transferNear(
       token_bridge,
       tokenAddress,
       BigInt(amount),
-      tryNativeToUint8Array(dstAddress, chainToChainId(dstChain)),
-      chainToChainId(dstChain),
+      tryNativeToUint8Array(dstAddress, dstChain),
+      toLegacyChainId(dstChain),
       BigInt(0)
     );
     for (const msg of msgs) {

@@ -157,7 +157,7 @@ func (gov *ChainGovernor) queryCoinGecko(ctx context.Context) error {
 		for {
 			select {
 			case <-ticker.C:
-				throttle <- 1 //nolint:channelcheck // We want this to block for throttling
+				throttle <- 1 // Note on channel capacity: We want this to block for throttling
 			case <-ctx.Done():
 				return
 			}
@@ -240,7 +240,7 @@ func (gov *ChainGovernor) queryCoinGecko(ctx context.Context) error {
 					zap.Stringer("cfgPrice", te.cfgPrice),
 				)
 
-				te.price = te.cfgPrice
+				te.price.Set(te.cfgPrice)
 				// Don't update the timestamp so we'll know when we last received an update from CoinGecko.
 			}
 		}
@@ -299,7 +299,7 @@ func (gov *ChainGovernor) revertAllPrices() {
 				zap.Stringer("cfgPrice", te.cfgPrice),
 			)
 
-			te.price = te.cfgPrice
+			te.price.Set(te.cfgPrice)
 			// Don't update the timestamp so we'll know when we last received an update from CoinGecko.
 		}
 	}

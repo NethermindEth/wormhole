@@ -39,7 +39,7 @@ func (s *SolanaWatcher) transactionProcessor(ctx context.Context) error {
 		s.pollPrevWormholeSignature, err = s.getPrevWormholeSignature()
 		if err != nil {
 			s.logger.Error("failed to get the last wormhole signature on start up", zap.Error(err))
-			s.errC <- err
+			s.errC <- err // Note on channel capacity: Error channel. Should never be stuck for long periods of time.
 			return err
 		}
 	}
@@ -58,7 +58,7 @@ func (s *SolanaWatcher) transactionProcessor(ctx context.Context) error {
 			err := s.processNewTransactions()
 			if err != nil {
 				s.logger.Error("failed to get transactions", zap.Error(err))
-				s.errC <- err
+				s.errC <- err // Note on channel capacity: Error channel. Should never be stuck for long periods of time.
 				return err
 			}
 		}
@@ -158,7 +158,7 @@ func (s *SolanaWatcher) processTransactionWithRetry(signature solana.Signature) 
 		}
 
 		rCtx, cancel := context.WithTimeout(s.ctx, rpcTimeout)
-		version := uint64(0)
+		version := uint64(1)
 		result, err := s.rpcClient.GetTransaction(
 			rCtx,
 			signature,

@@ -14,12 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/certusone/wormhole/node/pkg/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/certusone/wormhole/node/pkg/common"
 
 	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
@@ -196,7 +197,9 @@ func Test_validateTransactionMeta(t *testing.T) {
 
 func TestParseMessagePublicationAccount(t *testing.T) {
 
-	// Define well-formed Solana mainnet PostedMessage account data for reliable and unreliable messages
+	// Define well-formed Solana mainnet PostedMessage account data for reliable and unreliable messages.
+	// The SVM core bridge leaves vaa_time at zero for msg/msu accounts; post_vaa writes
+	// non-zero vaa_time to vaa-prefixed accounts instead.
 	var (
 		// Solana mainnet PostedMessage account: `GU76rcJ4rgw5sZQ2efVRC4yUZyhwrVM6pTGs2kFhckYy`
 		validMessageAccountDataReliable, _ = hex.DecodeString("6d73670020000000000000000000000000000000000000000000000000000000000000000000000000404d836900000000f5de1400000000000100ec7372995d5cc8732397fb0ad35c0121e0eaa90d26f828a534cab54391b3a4f5850000000100000000000000000000000000000000000000000000000000009ed268a30dd700000000000000000000000089f4e8011c35831130c4c3ab95e53de9411d2fcc00040000000000000000000000006722b2c28d7d299b56a5febedbbe865a84ee0d7d00040000000000000000000000000000000000000000000000000000000000000000")
@@ -216,10 +219,6 @@ func TestParseMessagePublicationAccount(t *testing.T) {
 	)
 
 	const (
-		// Define error string for testing. This is returned by the borsh-go library when it fails to
-		// deserialize a struct. In this case, we're relying on the library to fail when
-		// the message account data can't be deserialized into [MessagePublicationAccount].
-		errStringBorsh         = "failed to read required bytes"
 		errStringParseTooShort = "message account data is too short"
 	)
 
@@ -228,6 +227,7 @@ func TestParseMessagePublicationAccount(t *testing.T) {
 		// Named input parameters for target function.
 		messageAccountData func(t *testing.T) MessageAccountData
 		want               *MessagePublicationAccount
+		wantErr            bool
 		errStr             string
 	}{
 		{
@@ -237,17 +237,16 @@ func TestParseMessagePublicationAccount(t *testing.T) {
 				return mustNewMessageAccountData(t, validMessageAccountDataReliable)
 			},
 			want: &MessagePublicationAccount{
-				VaaVersion:       0,
-				ConsistencyLevel: 32,
-				EmitterAuthority: vaa.Address{},
-				MessageStatus:    0,
-				Gap:              [3]byte{0, 0, 0},
-				SubmissionTime:   1770212672,
-				Nonce:            0,
-				Sequence:         1367797,
-				EmitterChain:     1,
-				EmitterAddress:   emitterAddrReliable,
-				Payload:          payload,
+				VaaVersion:          0,
+				ConsistencyLevel:    32,
+				VaaTime:             0,
+				VaaSignatureAccount: solana.PublicKey{},
+				SubmissionTime:      1770212672,
+				Nonce:               0,
+				Sequence:            1367797,
+				EmitterChain:        1,
+				EmitterAddress:      emitterAddrReliable,
+				Payload:             payload,
 			},
 			errStr: "",
 		},
@@ -257,18 +256,56 @@ func TestParseMessagePublicationAccount(t *testing.T) {
 				return mustNewMessageAccountData(t, validMessageAccountDataUnreliable)
 			},
 			want: &MessagePublicationAccount{
-				VaaVersion:       0,
-				ConsistencyLevel: 1,
-				EmitterAuthority: vaa.Address{},
-				MessageStatus:    0,
-				Gap:              [3]byte{},
-				SubmissionTime:   1770216312,
-				Nonce:            0,
-				Sequence:         3458072,
-				EmitterChain:     1,
-				EmitterAddress:   emitterAddrUnreliable,
-				Payload:          nil, // borsh deserialization results in this being nil rather than an empty slice
+				VaaVersion:          0,
+				ConsistencyLevel:    1,
+				VaaTime:             0,
+				VaaSignatureAccount: solana.PublicKey{},
+				SubmissionTime:      1770216312,
+				Nonce:               0,
+				Sequence:            3458072,
+				EmitterChain:        1,
+				EmitterAddress:      emitterAddrUnreliable,
+				Payload:             nil, // borsh deserialization results in this being nil rather than an empty slice
 			},
+			errStr: "",
+		},
+		{
+			name: "failure -- trailing bytes are rejected",
+			messageAccountData: func(t *testing.T) MessageAccountData {
+				withTrailingBytes := append([]byte{}, validMessageAccountDataReliable...)
+				withTrailingBytes = append(withTrailingBytes, 0xff, 0xee, 0xdd)
+				return mustNewMessageAccountData(t, withTrailingBytes)
+			},
+			want:    &MessagePublicationAccount{},
+			wantErr: true,
+			errStr:  "trailing bytes",
+		},
+		{
+			name: "success -- reliable message with non-zero vaa time",
+			messageAccountData: func(t *testing.T) MessageAccountData {
+				acct := testMessagePublicationAccount(payload, 32)
+				acct.VaaTime = 1_700_000_000
+				return mustNewMessageAccountData(t, encodeMessagePublicationAccount(t, accountPrefixReliable, acct))
+			},
+			want: func() *MessagePublicationAccount {
+				acct := testMessagePublicationAccount(payload, 32)
+				acct.VaaTime = 1_700_000_000
+				return &acct
+			}(),
+			errStr: "",
+		},
+		{
+			name: "success -- unreliable message with non-zero vaa time",
+			messageAccountData: func(t *testing.T) MessageAccountData {
+				acct := testMessagePublicationAccount(nil, 1)
+				acct.VaaTime = 1_700_000_001
+				return mustNewMessageAccountData(t, encodeMessagePublicationAccount(t, accountPrefixUnreliable, acct))
+			},
+			want: func() *MessagePublicationAccount {
+				acct := testMessagePublicationAccount(nil, 1)
+				acct.VaaTime = 1_700_000_001
+				return &acct
+			}(),
 			errStr: "",
 		},
 		{
@@ -276,8 +313,9 @@ func TestParseMessagePublicationAccount(t *testing.T) {
 			messageAccountData: func(t *testing.T) MessageAccountData {
 				return MessageAccountData{}
 			},
-			want:   &MessagePublicationAccount{},
-			errStr: errStringParseTooShort,
+			want:    &MessagePublicationAccount{},
+			wantErr: true,
+			errStr:  errStringParseTooShort,
 		},
 		{
 			name: "failure -- data too short",
@@ -286,47 +324,60 @@ func TestParseMessagePublicationAccount(t *testing.T) {
 				// defense-in-depth length check rather than the constructor's validation.
 				return MessageAccountData{[]byte("ms")}
 			},
-			want:   &MessagePublicationAccount{},
-			errStr: errStringParseTooShort,
+			want:    &MessagePublicationAccount{},
+			wantErr: true,
+			errStr:  errStringParseTooShort,
 		},
 		{
 			name: "failure -- no data following prefix (msg)",
 			messageAccountData: func(t *testing.T) MessageAccountData {
 				return mustNewMessageAccountData(t, []byte("msg"))
 			},
-			want:   &MessagePublicationAccount{},
-			errStr: errStringBorsh,
+			want:    &MessagePublicationAccount{},
+			wantErr: true,
 		},
 		{
 			name: "failure -- no data following prefix (msu)",
 			messageAccountData: func(t *testing.T) MessageAccountData {
 				return mustNewMessageAccountData(t, []byte("msu"))
 			},
-			want:   &MessagePublicationAccount{},
-			errStr: errStringBorsh,
+			want:    &MessagePublicationAccount{},
+			wantErr: true,
 		},
 		{
 			name: "failure -- truncated data (msg)",
 			messageAccountData: func(t *testing.T) MessageAccountData {
 				return mustNewMessageAccountData(t, validMessageAccountDataReliable[:len(validMessageAccountDataReliable)-1])
 			},
-			want:   &MessagePublicationAccount{},
-			errStr: errStringBorsh,
+			want:    &MessagePublicationAccount{},
+			wantErr: true,
 		},
 		{
 			name: "failure -- truncated data (msu)",
 			messageAccountData: func(t *testing.T) MessageAccountData {
 				return mustNewMessageAccountData(t, validMessageAccountDataUnreliable[:len(validMessageAccountDataUnreliable)-1])
 			},
-			want:   &MessagePublicationAccount{},
-			errStr: errStringBorsh,
+			want:    &MessagePublicationAccount{},
+			wantErr: true,
+		},
+		{
+			name: "failure -- payload length exceeds remaining data",
+			messageAccountData: func(t *testing.T) MessageAccountData {
+				payloadLen := uint32(len(payload) + 1) // #nosec G115 -- Test data, payload length is small.
+				return mustNewMessageAccountData(t, corruptMessagePublicationPayloadLength(t, validMessageAccountDataReliable, payloadLen))
+			},
+			want:    &MessagePublicationAccount{},
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, gotErr := ParseMessagePublicationAccount(tt.messageAccountData(t))
-			if tt.errStr != "" {
-				require.ErrorContains(t, gotErr, tt.errStr)
+			if tt.wantErr {
+				require.Error(t, gotErr)
+				if tt.errStr != "" {
+					require.ErrorContains(t, gotErr, tt.errStr)
+				}
 				return
 			}
 
@@ -428,30 +479,6 @@ func TestProcessMessageAccount(t *testing.T) {
 			wantCount:        1,
 		},
 		{
-			name:             "skips_unfinalized",
-			chainID:          vaa.ChainIDSolana,
-			commitment:       rpc.CommitmentFinalized,
-			prefix:           accountPrefixReliable,
-			payload:          []byte("hello"),
-			consistencyLevel: 32,
-			tweakProposal: func(p *MessagePublicationAccount) {
-				copy(p.EmitterAuthority[:], bytes.Repeat([]byte{0x01}, len(p.EmitterAuthority)))
-			},
-		},
-		{
-			name:             "pythnet_bypasses_finalization_check",
-			chainID:          vaa.ChainIDPythNet,
-			commitment:       rpc.CommitmentFinalized,
-			prefix:           accountPrefixReliable,
-			payload:          []byte("hello"),
-			consistencyLevel: 32,
-			tweakProposal: func(p *MessagePublicationAccount) {
-				copy(p.EmitterAuthority[:], bytes.Repeat([]byte{0x01}, len(p.EmitterAuthority)))
-				p.MessageStatus = 1
-			},
-			wantCount: 1,
-		},
-		{
 			name:             "commitment_mismatch",
 			chainID:          vaa.ChainIDSolana,
 			commitment:       rpc.CommitmentConfirmed,
@@ -534,7 +561,7 @@ func TestProcessMessageAccount(t *testing.T) {
 			msg := <-msgC
 			require.NotNil(t, msg)
 			assert.Equal(t, acc.Bytes(), msg.TxID)
-			assert.Equal(t, time.Unix(int64(proposal.SubmissionTime), 0), msg.Timestamp)
+			assert.Equal(t, vaa.TimeFromUnixUint32(proposal.SubmissionTime), msg.Timestamp)
 			assert.Equal(t, proposal.Nonce, msg.Nonce)
 			assert.Equal(t, proposal.Sequence, msg.Sequence)
 			assert.Equal(t, tc.chainID, msg.EmitterChain)
@@ -550,7 +577,7 @@ func TestProcessMessageAccount(t *testing.T) {
 func TestProcessAccountSubscriptionData(t *testing.T) {
 	// Scenario: subscription messages are validated and decoded; invalid input yields errors or no-ops.
 	rawContract := "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth"
-	pubkey := "01234567890123456789012345678901"
+	pubkey := solana.PublicKeyFromBytes(bytes.Repeat([]byte{0xEE}, solana.PublicKeyLength)).String()
 
 	proposal := testMessagePublicationAccount([]byte("hello"), 32)
 	validAccountData := encodeMessagePublicationAccount(t, accountPrefixReliable, proposal)
@@ -657,42 +684,58 @@ func TestProcessAccountSubscriptionData(t *testing.T) {
 func TestProcessInstructionEarlyReturns(t *testing.T) {
 	// Scenario: instruction filtering should return early for non-matching cases.
 	commitmentMismatchData := encodePostMessageData(t, 42, []byte("hi"), consistencyLevelConfirmed)
+	payloadLenExceedsData := corruptPostMessagePayloadLength(t, encodePostMessageData(t, 7, []byte("test"), consistencyLevelFinalized), 6)
 
 	tests := []struct {
 		name    string
-		inst    solana.CompiledInstruction
+		inst    rpc.CompiledInstruction
 		wantErr bool
 	}{
 		{
 			name: "program_mismatch",
-			inst: solana.CompiledInstruction{ProgramIDIndex: 1},
+			inst: rpc.CompiledInstruction{ProgramIDIndex: 1},
 		},
 		{
 			name: "empty_data",
-			inst: solana.CompiledInstruction{ProgramIDIndex: 0, Data: []byte{}},
+			inst: rpc.CompiledInstruction{ProgramIDIndex: 0, Data: []byte{}},
 		},
 		{
 			name: "wrong_instruction",
-			inst: solana.CompiledInstruction{ProgramIDIndex: 0, Data: []byte{0x02}},
+			inst: rpc.CompiledInstruction{ProgramIDIndex: 0, Data: []byte{0x02}},
 		},
 		{
 			name:    "too_few_accounts",
-			inst:    solana.CompiledInstruction{ProgramIDIndex: 0, Data: []byte{postMessageInstructionID}, Accounts: []uint16{1, 2}},
+			inst:    rpc.CompiledInstruction{ProgramIDIndex: 0, Data: []byte{postMessageInstructionID}, Accounts: []uint16{1, 2}},
 			wantErr: true,
 		},
 		{
 			name:    "borsh_error",
-			inst:    solana.CompiledInstruction{ProgramIDIndex: 0, Data: []byte{postMessageInstructionID}, Accounts: make([]uint16, postMessageInstructionMinNumAccounts)},
+			inst:    rpc.CompiledInstruction{ProgramIDIndex: 0, Data: []byte{postMessageInstructionID}, Accounts: make([]uint16, postMessageInstructionMinNumAccounts)},
+			wantErr: true,
+		},
+		{
+			name:    "payload_length_exceeds_data",
+			inst:    rpc.CompiledInstruction{ProgramIDIndex: 0, Data: append([]byte{postMessageInstructionID}, payloadLenExceedsData...), Accounts: make([]uint16, postMessageInstructionMinNumAccounts)},
+			wantErr: true,
+		},
+		{
+			// The core bridge parses its instruction data strictly on-chain (solitaire
+			// uses borsh's try_from_slice, which rejects trailing bytes), so a padded
+			// instruction can never succeed on-chain and the watcher rejects it too.
+			// Contrast with the shim's PostMessage instruction data, which is parsed
+			// leniently on both sides (see Test_shimParsePostMessage).
+			name:    "trailing_bytes_rejected",
+			inst:    rpc.CompiledInstruction{ProgramIDIndex: 0, Data: append([]byte{postMessageInstructionID}, append(encodePostMessageData(t, 7, []byte("test"), consistencyLevelFinalized), 0xff, 0xee)...), Accounts: make([]uint16, postMessageInstructionMinNumAccounts)},
 			wantErr: true,
 		},
 		{
 			name:    "unsupported_consistency_level",
-			inst:    solana.CompiledInstruction{ProgramIDIndex: 0, Data: append([]byte{postMessageInstructionID}, encodePostMessageData(t, 7, []byte("test"), ConsistencyLevel(9))...), Accounts: make([]uint16, postMessageInstructionMinNumAccounts)},
+			inst:    rpc.CompiledInstruction{ProgramIDIndex: 0, Data: append([]byte{postMessageInstructionID}, encodePostMessageData(t, 7, []byte("test"), ConsistencyLevel(9))...), Accounts: make([]uint16, postMessageInstructionMinNumAccounts)},
 			wantErr: true,
 		},
 		{
 			name: "commitment_mismatch",
-			inst: solana.CompiledInstruction{
+			inst: rpc.CompiledInstruction{
 				ProgramIDIndex: 0,
 				Data:           append([]byte{postMessageInstructionID}, commitmentMismatchData...),
 				Accounts:       make([]uint16, postMessageInstructionMinNumAccounts),
@@ -768,7 +811,7 @@ func TestProcessInstructionValidPostMessage(t *testing.T) {
 			}
 
 			data := encodePostMessageData(t, 7, []byte("hello"), consistencyLevelFinalized)
-			inst := solana.CompiledInstruction{
+			inst := rpc.CompiledInstruction{
 				ProgramIDIndex: 0,
 				Data:           append([]byte{tc.instructionID}, data...),
 				Accounts:       []uint16{0, 1, 0, 0, 0, 0, 0, 0},
@@ -897,7 +940,7 @@ func TestProcessTransaction(t *testing.T) {
 			accountKeys:  standardKeys,
 			instructions: []solana.CompiledInstruction{integratorInstruction},
 			innerInstructions: []rpc.InnerInstruction{
-				{Index: 0, Instructions: []solana.CompiledInstruction{matchingInstruction}},
+				{Index: 0, Instructions: []rpc.CompiledInstruction{toRPCCompiledInstruction(matchingInstruction)}},
 			},
 			wantObservations: 1,
 		},
@@ -909,7 +952,7 @@ func TestProcessTransaction(t *testing.T) {
 				integratorInstruction,
 			},
 			innerInstructions: []rpc.InnerInstruction{
-				{Index: 1, Instructions: []solana.CompiledInstruction{matchingInstruction}},
+				{Index: 1, Instructions: []rpc.CompiledInstruction{toRPCCompiledInstruction(matchingInstruction)}},
 			},
 			wantObservations: 2,
 		},
@@ -938,10 +981,10 @@ func TestProcessTransaction(t *testing.T) {
 			accountKeys:  standardKeys,
 			instructions: []solana.CompiledInstruction{integratorInstruction},
 			innerInstructions: []rpc.InnerInstruction{
-				{Index: 0, Instructions: []solana.CompiledInstruction{
+				{Index: 0, Instructions: []rpc.CompiledInstruction{
 					// Borsh error inner: erroring CPI in front of a valid one.
 					{ProgramIDIndex: contractIdx, Data: []byte{postMessageInstructionID}, Accounts: make([]uint16, postMessageInstructionMinNumAccounts)},
-					matchingInstruction,
+					toRPCCompiledInstruction(matchingInstruction),
 				}},
 			},
 			wantObservations: 1,
@@ -962,7 +1005,7 @@ func TestProcessTransaction(t *testing.T) {
 			accountKeys:  shimKeys,
 			instructions: []solana.CompiledInstruction{shimTopLevelInst},
 			innerInstructions: []rpc.InnerInstruction{
-				{Index: 0, Instructions: []solana.CompiledInstruction{shimCoreInnerInst, shimEventInnerInst}},
+				{Index: 0, Instructions: []rpc.CompiledInstruction{toRPCCompiledInstruction(shimCoreInnerInst), toRPCCompiledInstruction(shimEventInnerInst)}},
 			},
 		},
 		{
@@ -971,7 +1014,7 @@ func TestProcessTransaction(t *testing.T) {
 			accountKeys:  shimKeys,
 			instructions: []solana.CompiledInstruction{shimTopLevelInst},
 			innerInstructions: []rpc.InnerInstruction{
-				{Index: 0, Instructions: []solana.CompiledInstruction{shimCoreInnerInst, shimEventInnerInst}},
+				{Index: 0, Instructions: []rpc.CompiledInstruction{toRPCCompiledInstruction(shimCoreInnerInst), toRPCCompiledInstruction(shimEventInnerInst)}},
 			},
 			wantObservations: 1,
 		},
@@ -981,10 +1024,10 @@ func TestProcessTransaction(t *testing.T) {
 			accountKeys:  shimKeys,
 			instructions: []solana.CompiledInstruction{integratorInstruction},
 			innerInstructions: []rpc.InnerInstruction{
-				{Index: 0, Instructions: []solana.CompiledInstruction{
+				{Index: 0, Instructions: []rpc.CompiledInstruction{
 					{ProgramIDIndex: shimContractIdx, Data: shimPostMsgData},
-					shimCoreInnerInst,
-					shimEventInnerInst,
+					toRPCCompiledInstruction(shimCoreInnerInst),
+					toRPCCompiledInstruction(shimEventInnerInst),
 				}},
 			},
 			wantObservations: 1,
@@ -998,7 +1041,7 @@ func TestProcessTransaction(t *testing.T) {
 				shimTopLevelInst,
 			},
 			innerInstructions: []rpc.InnerInstruction{
-				{Index: 1, Instructions: []solana.CompiledInstruction{shimCoreInnerInst, shimEventInnerInst}},
+				{Index: 1, Instructions: []rpc.CompiledInstruction{toRPCCompiledInstruction(shimCoreInnerInst), toRPCCompiledInstruction(shimEventInnerInst)}},
 			},
 			wantObservations: 2,
 		},
@@ -1019,13 +1062,13 @@ func TestProcessTransaction(t *testing.T) {
 				integratorInstruction,
 			},
 			innerInstructions: []rpc.InnerInstruction{
-				{Index: 1, Instructions: []solana.CompiledInstruction{matchingInstruction}},
-				{Index: 2, Instructions: []solana.CompiledInstruction{nonMatchingInstruction}},
-				{Index: 3, Instructions: []solana.CompiledInstruction{shimCoreInnerInst, shimEventInnerInst}},
-				{Index: 4, Instructions: []solana.CompiledInstruction{
+				{Index: 1, Instructions: []rpc.CompiledInstruction{toRPCCompiledInstruction(matchingInstruction)}},
+				{Index: 2, Instructions: []rpc.CompiledInstruction{toRPCCompiledInstruction(nonMatchingInstruction)}},
+				{Index: 3, Instructions: []rpc.CompiledInstruction{toRPCCompiledInstruction(shimCoreInnerInst), toRPCCompiledInstruction(shimEventInnerInst)}},
+				{Index: 4, Instructions: []rpc.CompiledInstruction{
 					{ProgramIDIndex: shimContractIdx, Data: shimPostMsgData},
-					shimCoreInnerInst,
-					shimEventInnerInst,
+					toRPCCompiledInstruction(shimCoreInnerInst),
+					toRPCCompiledInstruction(shimEventInnerInst),
 				}},
 			},
 			wantObservations: 4,
@@ -1041,7 +1084,7 @@ func TestProcessTransaction(t *testing.T) {
 				shimTopLevelInst,
 			},
 			innerInstructions: []rpc.InnerInstruction{
-				{Index: 1, Instructions: []solana.CompiledInstruction{shimCoreInnerInst, shimEventInnerInst}},
+				{Index: 1, Instructions: []rpc.CompiledInstruction{toRPCCompiledInstruction(shimCoreInnerInst), toRPCCompiledInstruction(shimEventInnerInst)}},
 			},
 			wantObservations: 1,
 		},
@@ -1429,6 +1472,31 @@ func TestPopulateLookupTableAccounts(t *testing.T) {
 	}
 }
 
+// TestPopulateLookupTableAccountsV1NoOp confirms that v1 transactions
+// (SIMD-0385) are treated as versioned but require no lookup-table
+// resolution, since the v1 format never carries address table lookups.
+func TestPopulateLookupTableAccountsV1NoOp(t *testing.T) {
+	staticAddr := solana.PublicKeyFromBytes(bytes.Repeat([]byte{0x02}, solana.PublicKeyLength))
+
+	tx := &solana.Transaction{
+		Message: solana.Message{
+			AccountKeys: []solana.PublicKey{staticAddr},
+		},
+	}
+	_, err := tx.Message.SetVersion(solana.MessageVersionV1)
+	require.NoError(t, err)
+	require.True(t, tx.Message.IsVersioned())
+	require.Empty(t, tx.Message.GetAddressTableLookups())
+
+	m := newMockRPCServer(t)
+	defer m.Close()
+
+	s := newTestWatcher(t, vaa.ChainIDSolana, rpc.CommitmentFinalized, nil)
+	err = s.populateLookupTableAccounts(context.Background(), rpc.New(m.URL), tx)
+	require.NoError(t, err)
+	require.Equal(t, []solana.PublicKey{staticAddr}, []solana.PublicKey(tx.Message.AccountKeys))
+}
+
 // Test helpers
 
 func newTestWatcher(t *testing.T, chainID vaa.ChainID, commitment rpc.CommitmentType, msgC chan<- *common.MessagePublication) *SolanaWatcher {
@@ -1450,7 +1518,6 @@ func testMessagePublicationAccount(payload []byte, consistencyLevel uint8) Messa
 	return MessagePublicationAccount{
 		VaaVersion:       1,
 		ConsistencyLevel: consistencyLevel,
-		MessageStatus:    0,
 		SubmissionTime:   123,
 		Nonce:            7,
 		Sequence:         99,
@@ -1472,9 +1539,8 @@ func encodeMessagePublicationAccount(t *testing.T, prefix string, proposal Messa
 	buf.WriteString(prefix)
 	buf.WriteByte(proposal.VaaVersion)
 	buf.WriteByte(proposal.ConsistencyLevel)
-	buf.Write(proposal.EmitterAuthority[:])
-	buf.WriteByte(proposal.MessageStatus)
-	buf.Write(proposal.Gap[:])
+	writeLE(t, buf, proposal.VaaTime)
+	buf.Write(proposal.VaaSignatureAccount[:])
 	writeLE(t, buf, proposal.SubmissionTime)
 	writeLE(t, buf, proposal.Nonce)
 	writeLE(t, buf, proposal.Sequence)
@@ -1483,6 +1549,15 @@ func encodeMessagePublicationAccount(t *testing.T, prefix string, proposal Messa
 	writeLE(t, buf, uint32(len(proposal.Payload))) // #nosec G115 -- Test data, payload length is always small.
 	buf.Write(proposal.Payload)
 	return buf.Bytes()
+}
+
+func corruptMessagePublicationPayloadLength(t *testing.T, data []byte, payloadLen uint32) []byte {
+	t.Helper()
+	const payloadLenOffset = 3 + 1 + 1 + 32 + 1 + 3 + 4 + 4 + 8 + 2 + 32
+	ret := append([]byte{}, data...)
+	require.GreaterOrEqual(t, len(ret), payloadLenOffset+4)
+	binary.LittleEndian.PutUint32(ret[payloadLenOffset:payloadLenOffset+4], payloadLen)
+	return ret
 }
 
 func mustDecodeHex(t *testing.T, s string) []byte {
@@ -1513,6 +1588,15 @@ func encodePostMessageData(t *testing.T, nonce uint32, payload []byte, consisten
 	buf.Write(payload)
 	buf.WriteByte(byte(consistency))
 	return buf.Bytes()
+}
+
+func corruptPostMessagePayloadLength(t *testing.T, data []byte, payloadLen uint32) []byte {
+	t.Helper()
+	const payloadLenOffset = 4
+	ret := append([]byte{}, data...)
+	require.GreaterOrEqual(t, len(ret), payloadLenOffset+4)
+	binary.LittleEndian.PutUint32(ret[payloadLenOffset:payloadLenOffset+4], payloadLen)
+	return ret
 }
 
 func buildSubscriptionPayload(t *testing.T, owner, pubkey string, accountData []byte) []byte {

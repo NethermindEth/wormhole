@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,19 +21,19 @@ import (
 	"github.com/certusone/wormhole/node/pkg/readiness"
 	"github.com/certusone/wormhole/node/pkg/supervisor"
 	"github.com/certusone/wormhole/node/pkg/watchers"
+	"github.com/coder/websocket"
+	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
 	lookup "github.com/gagliardetto/solana-go/programs/address-lookup-table"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/gagliardetto/solana-go/rpc/jsonrpc"
 	"github.com/google/uuid"
 	"github.com/mr-tron/base58"
-	"github.com/near/borsh-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"nhooyr.io/websocket"
 )
 
 type (
@@ -130,21 +129,38 @@ type (
 		} `json:"params"`
 	}
 
+	// The two types below represent Go equivalent of the on-chain Solana structs corresponding
+	// to message publication accounts and the account data within those accounts.
+
 	// MessagePublicationAccount is the data structure used to deserialize Solana PostedMessage account data for
 	// both the reliable and unreliable message types.
 	// It corresponds to the `data` field of the Wormhole PostedMessage account.
+	// Keep this layout in sync with the Solana core bridge MessageData struct in
+	// solana/bridge/program/src/accounts/posted_message.rs.
 	MessagePublicationAccount struct {
-		VaaVersion       uint8
+		// VaaVersion corresponds to MessageData::vaa_version (u8).
+		VaaVersion uint8
+		// ConsistencyLevel corresponds to MessageData::consistency_level (u8).
 		ConsistencyLevel uint8
-		EmitterAuthority vaa.Address
-		MessageStatus    uint8
-		Gap              [3]byte
-		SubmissionTime   uint32
-		Nonce            uint32
-		Sequence         uint64
-		EmitterChain     uint16
-		EmitterAddress   vaa.Address
-		// Payload is the message payload. It is a variable-length byte array with no minimum length.
+		// VaaTime corresponds to MessageData::vaa_time (u32). The SVM core bridge's
+		// post_message and post_message_unreliable paths leave this field at zero for
+		// msg/msu accounts; post_vaa sets non-zero values on vaa-prefixed accounts.
+		// See https://github.com/wormhole-foundation/wormhole/blob/main/solana/bridge/program/src/api/post_message.rs
+		// and https://github.com/wormhole-foundation/wormhole/blob/main/solana/bridge/program/src/api/post_vaa.rs.
+		VaaTime uint32
+		// VaaSignatureAccount corresponds to MessageData::vaa_signature_account (Pubkey).
+		VaaSignatureAccount solana.PublicKey
+		// SubmissionTime corresponds to MessageData::submission_time (u32).
+		SubmissionTime uint32
+		// Nonce corresponds to MessageData::nonce (u32).
+		Nonce uint32
+		// Sequence corresponds to MessageData::sequence (u64).
+		Sequence uint64
+		// EmitterChain corresponds to MessageData::emitter_chain (u16).
+		EmitterChain uint16
+		// EmitterAddress corresponds to MessageData::emitter_address ([u8; 32]).
+		EmitterAddress vaa.Address
+		// Payload corresponds to MessageData::payload (Vec<u8>). It is a variable-length byte array with no minimum length.
 		// Messages using the Shim contract will have a payload of length 0.
 		Payload []byte
 	}
@@ -197,13 +213,8 @@ const (
 )
 
 var (
-	emptyAddressBytes = vaa.Address{}.Bytes()
-	emptyGapBytes     = []byte{0, 0, 0}
-
 	addressLookupTableProgramID = solana.MustPublicKeyFromBase58("AddressLookupTab1e1111111111111111111111111")
-)
 
-var (
 	solanaConnectionErrors = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "wormhole_solana_connection_errors_total",
@@ -321,6 +332,29 @@ type PostMessageData struct {
 	ConsistencyLevel ConsistencyLevel
 }
 
+// decodeBorsh deserializes data into dst, requiring the entire input to be consumed.
+// The Borsh reference implementation (borsh-rs) rejects unconsumed trailing bytes at its
+// API boundary (try_from_slice), but bin.UnmarshalBorsh does not, so we enforce it here.
+// https://github.com/near/borsh#specification
+func decodeBorsh(dst any, data []byte) error {
+	dec := bin.NewBorshDecoder(data)
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	if dec.HasRemaining() {
+		return fmt.Errorf("borsh: %d trailing bytes not consumed", dec.Remaining())
+	}
+	return nil
+}
+
+// decodeBorshAllowTrailing deserializes data into dst, ignoring any trailing bytes.
+// Use this only where the corresponding on-chain program is also lenient — the watcher
+// must accept exactly what the chain accepted. The shim's post message parser explicitly
+// ignores trailing bytes (svm/wormhole-core-shims/crates/shim/src/post_message.rs).
+func decodeBorshAllowTrailing(dst any, data []byte) error {
+	return bin.UnmarshalBorsh(dst, data)
+}
+
 func NewSolanaWatcher(
 	rpcUrl string,
 	wsUrl string,
@@ -414,7 +448,7 @@ func (s *SolanaWatcher) setupWebSocket(ctx context.Context) error {
 					logger.Error("failed to read from account web socket", zap.Error(err))
 					return err
 				} else {
-					s.pumpData <- msg //nolint:channelcheck // Only pauses this watcher
+					s.pumpData <- msg // Note on channel capacity: Only pauses this watcher
 				}
 			}
 		}
@@ -499,20 +533,22 @@ func (s *SolanaWatcher) Run(ctx context.Context) error {
 				if err != nil {
 					p2p.DefaultRegistry.AddErrorCount(s.chainID, 1)
 					solanaConnectionErrors.WithLabelValues(s.networkName, string(s.commitment), "account_subscription_data").Inc()
-					s.errC <- err //nolint:channelcheck // The watcher will exit anyway
+					s.errC <- err // Note on channel capacity: The watcher will exit anyway
 					return err
 				}
 			case m := <-s.obsvReqC:
-				if m.ChainId > math.MaxUint16 {
-					logger.Error("chain id for observation request is not a valid uint16",
+				chainId, err := vaa.KnownChainIDFromNumber[uint32](m.ChainId)
+				if err != nil {
+					logger.Error("invalid chain id for observation request",
 						zap.Uint32("chainID", m.ChainId),
 						zap.String("txID", hex.EncodeToString(m.TxHash)),
+						zap.Error(err),
 					)
 					continue
 				}
 
 				//nolint:contextcheck // Passed via the 's' object instead of as a parameter.
-				numObservations, err := s.handleReobservationRequest(vaa.ChainID(m.ChainId), m.TxHash, s.rpcClient)
+				numObservations, err := s.handleReobservationRequest(chainId, m.TxHash, s.rpcClient)
 				if err != nil {
 					logger.Error("failed to process observation request",
 						zap.Uint32("chainID", m.ChainId),
@@ -536,7 +572,7 @@ func (s *SolanaWatcher) Run(ctx context.Context) error {
 				if err != nil {
 					p2p.DefaultRegistry.AddErrorCount(s.chainID, 1)
 					solanaConnectionErrors.WithLabelValues(s.networkName, string(s.commitment), "get_slot_error").Inc()
-					s.errC <- err //nolint:channelcheck // The watcher will exit anyway
+					s.errC <- err // Note on channel capacity: The watcher will exit anyway
 					return err
 				}
 
@@ -628,7 +664,7 @@ func (s *SolanaWatcher) fetchBlock(ctx context.Context, logger *zap.Logger, slot
 	start := time.Now()
 	rewards := false
 
-	maxSupportedTransactionVersion := uint64(0)
+	maxSupportedTransactionVersion := uint64(1)
 	out, err := s.rpcClient.GetBlockWithOpts(rCtx, slot, &rpc.GetBlockOpts{
 		Encoding:                       solana.EncodingBase64, // solana-go doesn't support json encoding.
 		TransactionDetails:             "full",
@@ -836,7 +872,7 @@ func (s *SolanaWatcher) processTransaction(ctx context.Context, rpcClient *rpc.C
 				}
 			}
 		} else {
-			found, err := s.processInstruction(ctx, rpcClient, slot, inst, programIndex, tx, signature, i, isReobservation)
+			found, err := s.processInstruction(ctx, rpcClient, slot, toRPCCompiledInstruction(inst), programIndex, tx, signature, i, isReobservation)
 			if err != nil {
 				s.logger.Error("malformed Wormhole instruction",
 					zap.Error(err),
@@ -935,7 +971,23 @@ func (s *SolanaWatcher) processTransaction(ctx context.Context, rpcClient *rpc.C
 	return
 }
 
-func (s *SolanaWatcher) processInstruction(ctx context.Context, rpcClient *rpc.Client, slot uint64, inst solana.CompiledInstruction, programIndex uint16, tx *solana.Transaction, signature solana.Signature, idx int, isReobservation bool) (bool, error) {
+// toRPCCompiledInstruction converts a top-level solana.CompiledInstruction
+// (from tx.Message.Instructions) into an rpc.CompiledInstruction, the type
+// used for inner instructions (meta.InnerInstructions[i].Instructions), so
+// both can be passed through the same instruction-processing functions.
+func toRPCCompiledInstruction(inst solana.CompiledInstruction) rpc.CompiledInstruction {
+	return rpc.CompiledInstruction{
+		ProgramIDIndex: inst.ProgramIDIndex,
+		Accounts:       inst.Accounts,
+		Data:           inst.Data,
+		// StackHeight reflects RPC-reported CPI depth for inner instructions;
+		// fixed at 0 here since inst is always a top-level instruction.
+		// Trust StackHeight only on instructions sourced directly from the RPC.
+		StackHeight: 0,
+	}
+}
+
+func (s *SolanaWatcher) processInstruction(ctx context.Context, rpcClient *rpc.Client, slot uint64, inst rpc.CompiledInstruction, programIndex uint16, tx *solana.Transaction, signature solana.Signature, idx int, isReobservation bool) (bool, error) {
 	if inst.ProgramIDIndex != programIndex {
 		return false, nil
 	}
@@ -955,7 +1007,7 @@ func (s *SolanaWatcher) processInstruction(ctx context.Context, rpcClient *rpc.C
 
 	// Decode instruction data (UNTRUSTED)
 	var data PostMessageData
-	if err := borsh.Deserialize(&data, inst.Data[1:]); err != nil {
+	if err := decodeBorsh(&data, inst.Data[1:]); err != nil {
 		return false, fmt.Errorf("failed to deserialize instruction data: %w", err)
 	}
 
@@ -1153,9 +1205,13 @@ func (s *SolanaWatcher) processAccountSubscriptionData(_ context.Context, data [
 		return nil
 	}
 
-	acc := solana.PublicKeyFromBytes([]byte(value.Pubkey))
-	// NOTE: We don't care about the number of observations here so the return value is ignored.
-	// The called function will still publish observations if it is successful.
+	// value.Pubkey is base58-encoded, per the Solana JSON-RPC account notification format.
+	acc, err := solana.PublicKeyFromBase58(value.Pubkey)
+	if err != nil {
+		s.logger.Error("failed to parse account pubkey", zap.String("account", value.Pubkey), zap.Error(err))
+		p2p.DefaultRegistry.AddErrorCount(s.chainID, 1)
+		return nil
+	}
 	s.processMessageAccount(s.logger, messageAccountData, acc, isReobservation, solana.Signature{}, false)
 
 	return nil
@@ -1195,20 +1251,6 @@ func (s *SolanaWatcher) processMessageAccount(logger *zap.Logger, messageAccount
 		return
 	}
 
-	// As of 2023-11-09, Pythnet has a bug which is not zeroing out these fields appropriately. This carve out should be removed after a fix is deployed.
-	if s.chainID != vaa.ChainIDPythNet {
-		// SECURITY: ensure these fields are zeroed out. in the legacy solana program they were always zero, and in the 2023 rewrite they are zeroed once the account is finalized
-		if !bytes.Equal(proposal.EmitterAuthority.Bytes(), emptyAddressBytes) || proposal.MessageStatus != 0 || !bytes.Equal(proposal.Gap[:], emptyGapBytes) {
-			solanaAccountSkips.WithLabelValues(s.networkName, "unfinalized_account").Inc()
-			logger.Error(
-				"account is not finalized",
-				zap.Stringer("account", acc),
-				zap.String("data", messageAccountData.String()),
-			)
-			return
-		}
-	}
-
 	var txID []byte
 	if useSignatureAsTxID && !signature.IsZero() {
 		// Close event path: use the Solana transaction signature as TxID,
@@ -1221,7 +1263,7 @@ func (s *SolanaWatcher) processMessageAccount(logger *zap.Logger, messageAccount
 
 	observation := &common.MessagePublication{
 		TxID:             txID,
-		Timestamp:        time.Unix(int64(proposal.SubmissionTime), 0),
+		Timestamp:        vaa.TimeFromUnixUint32(proposal.SubmissionTime),
 		Nonce:            proposal.Nonce,
 		Sequence:         proposal.Sequence,
 		EmitterChain:     s.chainID, // SECURITY: The message must be emitted from the chain this watcher is observing. This prevents mix-ups between different SVM chains.
@@ -1269,7 +1311,7 @@ func (s *SolanaWatcher) processMessageAccount(logger *zap.Logger, messageAccount
 		)
 	}
 
-	s.msgC <- observation //nolint:channelcheck // The channel to the processor is buffered and shared across chains, if it backs up we should stop processing new observations
+	s.msgC <- observation // Note on channel capacity: The channel to the processor is buffered and shared across chains, if it backs up we should stop processing new observations
 	return 1
 }
 
@@ -1307,7 +1349,7 @@ func ParseMessagePublicationAccount(
 	}
 
 	prop := &MessagePublicationAccount{}
-	if err := borsh.Deserialize(prop, data[prefixLength:]); err != nil {
+	if err := decodeBorsh(prop, data[prefixLength:]); err != nil {
 		return nil, err
 	}
 

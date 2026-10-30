@@ -33,8 +33,8 @@ const (
 	postMessageInstructionID = 0x01
 )
 
-func getAdminClient(ctx context.Context, addr string) (*grpc.ClientConn, nodev1.NodePrivilegedServiceClient, error) {
-	conn, err := grpc.DialContext(ctx, fmt.Sprintf("unix:///%s", addr), grpc.WithTransportCredentials(insecure.NewCredentials()))
+func getAdminClient(addr string) (*grpc.ClientConn, nodev1.NodePrivilegedServiceClient, error) {
+	conn, err := grpc.NewClient(fmt.Sprintf("unix:///%s", addr), grpc.WithTransportCredentials(insecure.NewCredentials()))
 
 	if err != nil {
 		log.Fatalf("failed to connect to %s: %v", addr, err)
@@ -50,7 +50,7 @@ func main() {
 	ctx := context.Background()
 	sr := rpc.New(*solanaRPC)
 
-	conn, admin, err := getAdminClient(ctx, *adminRPC)
+	conn, admin, err := getAdminClient(*adminRPC)
 	if err != nil {
 		conn.Close()
 		log.Fatalf("failed to get admin client: %v", err)
@@ -220,6 +220,7 @@ func main() {
 						if err != nil {
 							panic(err)
 						}
+						// #nosec G704 -- Maintenance script calling public Wormhole RPC endpoint
 						resp, err := hc.Do(req)
 						if err != nil {
 							log.Fatalf("verify: %v", err)
@@ -228,6 +229,7 @@ func main() {
 						defer resp.Body.Close()
 
 						if resp.StatusCode != http.StatusOK {
+							// #nosec G706 -- Logging response status code from trusted API
 							log.Printf("status %d, retrying", resp.StatusCode)
 							time.Sleep(5 * time.Second)
 							continue
@@ -245,7 +247,7 @@ func main() {
 }
 
 func fetchTxSeq(ctx context.Context, c *rpc.Client, sig solana.Signature) (*rpc.GetTransactionResult, uint64, error) {
-	maxSupportedTransactionVersion := uint64(0)
+	maxSupportedTransactionVersion := uint64(1)
 	params := rpc.GetTransactionOpts{
 		Encoding:                       solana.EncodingBase64,
 		Commitment:                     rpc.CommitmentConfirmed,
@@ -307,8 +309,10 @@ func process(out *rpc.GetTransactionResult) *solana.PublicKey {
 
 	log.Printf("found Wormhole tx in %s", signature)
 
-	txs := make([]solana.CompiledInstruction, 0, len(tx.Message.Instructions))
-	txs = append(txs, tx.Message.Instructions...)
+	txs := make([]rpc.CompiledInstruction, 0, len(tx.Message.Instructions))
+	for _, inst := range tx.Message.Instructions {
+		txs = append(txs, rpc.CompiledInstruction{ProgramIDIndex: inst.ProgramIDIndex, Accounts: inst.Accounts, Data: inst.Data})
+	}
 	for _, inner := range out.Meta.InnerInstructions {
 		txs = append(txs, inner.Instructions...)
 	}

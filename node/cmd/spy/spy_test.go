@@ -10,12 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/certusone/wormhole/node/pkg/common"
-	publicrpcv1 "github.com/certusone/wormhole/node/pkg/proto/publicrpc/v1"
-	spyv1 "github.com/certusone/wormhole/node/pkg/proto/spy/v1"
 	ipfslog "github.com/ipfs/go-log/v2"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	"go.uber.org/zap"
+
+	"github.com/certusone/wormhole/node/pkg/common"
+	publicrpcv1 "github.com/certusone/wormhole/node/pkg/proto/publicrpc/v1"
+	spyv1 "github.com/certusone/wormhole/node/pkg/proto/spy/v1"
+	"github.com/certusone/wormhole/node/pkg/testutils"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -29,14 +31,16 @@ var govEmitter = vaa.Address{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
 // const govAddress = "0000000000000000000000000000000000000000000000000000000000000004"
 
 // helper method for *vaa.VAA creation
-func getVAA(chainID vaa.ChainID, emitterAddr vaa.Address) *vaa.VAA {
+func getVAA(t testing.TB, chainID vaa.ChainID, emitterAddr vaa.Address) *vaa.VAA {
+	t.Helper()
+
 	var payload = []byte{97, 97, 97, 97, 97, 97}
 
 	return &vaa.VAA{
 		Version:          vaa.SupportedVAAVersion,
 		GuardianSetIndex: uint32(1),
 		Signatures:       nil,
-		Timestamp:        time.Unix(0, 0),
+		Timestamp:        testutils.MustTimeFromUnix(t, 0),
 		Nonce:            1,
 		Sequence:         1,
 		ConsistencyLevel: uint8(32),
@@ -110,7 +114,7 @@ func bufDialer(context.Context, string) (net.Conn, error) {
 func grpcClientSetup(t *testing.T) (context.Context, *grpc.ClientConn, spyv1.SpyRPCServiceClient) {
 	ctx := context.Background()
 	creds := grpc.WithTransportCredentials(insecure.NewCredentials())
-	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(bufDialer), creds)
+	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithContextDialer(bufDialer), creds)
 	if err != nil {
 		t.Fatalf("Failed to dial bufnet: %v", err)
 	}
@@ -153,12 +157,57 @@ func TestSpySubscribeEmitterFilter(t *testing.T) {
 	// just check the subscription can be created without returning an error
 }
 
+// Tests that duplicate (identical) filters supplied at subscribe time are deduplicated.
+// Without dedup, a single VAA would be collected once per duplicate filter in PublishSignedVAA
+// and sent multiple times to the subscription's capacity-1 channel; because that send is
+// intentionally blocking, more than one queued send to a torn-down subscriber could block the
+// single publisher goroutine forever.
+func TestSpySubscribeDeduplicatesFilters(t *testing.T) {
+	ctx, conn, client := grpcClientSetup(t)
+	defer conn.Close()
+
+	// Use a unique emitter so this subscription is unambiguous among any others in the shared server.
+	dedupEmitter := vaa.Address{0xde, 0xdb, 0xee, 0xff} // distinct from govEmitter and differentEmitter
+	emitterFilter := &spyv1.EmitterFilter{
+		ChainId:        publicrpcv1.ChainID(vaa.ChainIDEthereum),
+		EmitterAddress: dedupEmitter.String(),
+	}
+	filter := &spyv1.FilterEntry{Filter: &spyv1.FilterEntry_EmitterFilter{EmitterFilter: emitterFilter}}
+
+	// Subscribe with the same filter three times.
+	req := &spyv1.SubscribeSignedVAARequest{Filters: []*spyv1.FilterEntry{filter, filter, filter}}
+	if _, err := client.SubscribeSignedVAA(ctx, req); err != nil {
+		t.Fatalf("SubscribeSignedVAA failed: %v", err)
+	}
+
+	waitForClientSubscriptionInit(mockedSpyServer)
+
+	// Find the subscription with our unique emitter and assert its filters were deduplicated to one.
+	want := filterSignedVaa{chainId: vaa.ChainIDEthereum, emitterAddr: dedupEmitter}
+	mockedSpyServer.subsSignedVaaMu.Lock()
+	defer mockedSpyServer.subsSignedVaaMu.Unlock()
+	found := false
+	for _, sub := range mockedSpyServer.subsSignedVaa {
+		for _, f := range sub.filters {
+			if f == want {
+				found = true
+				if len(sub.filters) != 1 {
+					t.Fatalf("expected duplicate filters to be deduplicated to 1, got %d", len(sub.filters))
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("did not find the subscription with the deduplicated emitter filter")
+	}
+}
+
 // Tests a subscription to spySever with no filters will return message(s)
 func TestSpyHandleGossipVAA(t *testing.T) {
 	ctx, conn, client := grpcClientSetup(t)
 	defer conn.Close()
 
-	vaaToSend := getVAA(vaa.ChainIDEthereum, govEmitter)
+	vaaToSend := getVAA(t, vaa.ChainIDEthereum, govEmitter)
 
 	req := &spyv1.SubscribeSignedVAARequest{Filters: []*spyv1.FilterEntry{}}
 
@@ -213,7 +262,7 @@ func TestSpyHandleEmitterFilter(t *testing.T) {
 	ctx, conn, client := grpcClientSetup(t)
 	defer conn.Close()
 
-	vaaToSend := getVAA(vaa.ChainIDEthereum, govEmitter)
+	vaaToSend := getVAA(t, vaa.ChainIDEthereum, govEmitter)
 	vaaBytes, err := vaaToSend.Marshal()
 	if err != nil {
 		t.Fatal("failed marshaling VAA to bytes")
@@ -263,7 +312,7 @@ func TestSpyHandleEmitterFilter(t *testing.T) {
 
 	// should not be sent to us by the server
 	// everything passes the filter except for chainID
-	msg1 := getVAA(vaa.ChainIDSolana, govEmitter)
+	msg1 := getVAA(t, vaa.ChainIDSolana, govEmitter)
 	msg1Bytes, err := msg1.Marshal()
 	if err != nil {
 		t.Fatal("failed marshaling VAA to bytes")
@@ -275,7 +324,7 @@ func TestSpyHandleEmitterFilter(t *testing.T) {
 	// should not be sent to us by the server
 	// everything passes the filter except for emitterAddress
 	differentEmitter := vaa.Address{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
-	msg2 := getVAA(vaa.ChainIDEthereum, differentEmitter)
+	msg2 := getVAA(t, vaa.ChainIDEthereum, differentEmitter)
 	msg2Bytes, err := msg2.Marshal()
 	if err != nil {
 		t.Fatal("failed marshaling VAA to bytes")

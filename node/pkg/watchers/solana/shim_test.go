@@ -5,13 +5,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"testing"
-	"time"
 
-	"github.com/certusone/wormhole/node/pkg/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 	"go.uber.org/zap"
+
+	"github.com/certusone/wormhole/node/pkg/common"
+	"github.com/certusone/wormhole/node/pkg/testutils"
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
@@ -58,6 +59,26 @@ func Test_shimParsePostMessage(t *testing.T) {
 	assert.Equal(t, uint32(42), postMsgData.Nonce)
 	assert.Equal(t, consistencyLevelFinalized, postMsgData.ConsistencyLevel)
 	assert.Equal(t, 11, len(postMsgData.Payload))
+	assert.True(t, bytes.Equal([]byte("hello world"), postMsgData.Payload))
+
+	// Same payload with trailing bytes appended: must parse successfully.
+	//
+	// PostMessage instruction data is written by the integrator, and the on-chain shim
+	// parses it leniently, explicitly ignoring trailing bytes
+	// (svm/wormhole-core-shims/crates/shim/src/post_message.rs). A padded instruction can
+	// therefore succeed on-chain and emit a legitimate message. The watcher must accept
+	// everything the chain accepted, so it must tolerate trailing bytes here — unlike the
+	// shim's MessageEvent data, which only the shim program itself can write (see
+	// Test_shimParseMessageEvent).
+	withTrailingBytes, err := hex.DecodeString("d63264d12622074c2a000000010b00000068656c6c6f20776f726c64ffeedd")
+	require.NoError(t, err)
+
+	postMsgData, err = shimParsePostMessage(shimPostMessage, withTrailingBytes)
+	require.NoError(t, err)
+	require.NotNil(t, postMsgData)
+
+	assert.Equal(t, uint32(42), postMsgData.Nonce)
+	assert.Equal(t, consistencyLevelFinalized, postMsgData.ConsistencyLevel)
 	assert.True(t, bytes.Equal([]byte("hello world"), postMsgData.Payload))
 
 	// Same payload with the first discriminator byte flipped: prefix no longer
@@ -113,6 +134,16 @@ func Test_shimVerifyCoreMessage(t *testing.T) {
 			hexData: "082a00", // id=0x08 followed by partial nonce
 			wantErr: true,
 		},
+		{
+			// This is core bridge instruction data, not shim data, so the lenient shim
+			// parsing rules do not apply: the core bridge parses its instruction data
+			// strictly on-chain (solitaire uses borsh's try_from_slice, which rejects
+			// trailing bytes), meaning a padded instruction can never succeed on-chain.
+			// The watcher mirrors that and rejects trailing bytes too.
+			name:    "trailing bytes return an error",
+			hexData: "082a0000000000000001ffee", // valid unreliable data followed by two extra bytes
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -148,6 +179,20 @@ func Test_shimParseMessageEvent(t *testing.T) {
 	assert.True(t, bytes.Equal(expectedEmitter, msgEventData.EmitterAddress[:]))
 	assert.Equal(t, uint64(0), msgEventData.Sequence)
 	assert.Equal(t, uint32(1736530812), msgEventData.Timestamp)
+
+	// Same event with trailing bytes appended: must be rejected.
+	//
+	// Unlike PostMessage instruction data (integrator-written, parsed leniently on-chain —
+	// see Test_shimParsePostMessage), MessageEvent data is never user input: it is the
+	// event self-CPI that the shim program constructs itself, always exactly 60 bytes
+	// (svm/wormhole-core-shims/programs/post-message/src/lib.rs), and the receiving
+	// instruction requires the shim's event authority PDA as signer, which only the shim
+	// program can provide. Trailing bytes therefore cannot occur on-chain, so we reject them
+	// in the Watcher too.
+	withTrailingBytes := append(append([]byte{}, data...), 0xff, 0xee)
+	msgEventData, err = shimParseMessageEvent(shimMessageEvent, withTrailingBytes)
+	require.ErrorContains(t, err, "trailing bytes")
+	assert.Nil(t, msgEventData)
 }
 
 func Test_shimParseMessageEventDiscriminatorMismatch(t *testing.T) {
@@ -418,7 +463,7 @@ func TestShimDirect(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, expectedTxID, msg.TxID)
-	assert.Equal(t, time.Unix(int64(1736530812), 0), msg.Timestamp)
+	assert.Equal(t, testutils.MustTimeFromUnix(t, 1736530812), msg.Timestamp)
 	assert.Equal(t, uint32(42), msg.Nonce)
 	assert.Equal(t, uint64(0), msg.Sequence)
 	assert.Equal(t, vaa.ChainIDSolana, msg.EmitterChain)
@@ -594,7 +639,7 @@ func TestShimFromIntegrator(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, expectedTxID, msg.TxID)
-	assert.Equal(t, time.Unix(int64(1736542615), 0), msg.Timestamp)
+	assert.Equal(t, testutils.MustTimeFromUnix(t, 1736542615), msg.Timestamp)
 	assert.Equal(t, uint32(0), msg.Nonce)
 	assert.Equal(t, uint64(1), msg.Sequence)
 	assert.Equal(t, vaa.ChainIDSolana, msg.EmitterChain)
@@ -836,7 +881,7 @@ func TestShimDirectWithMultipleShimTransactions(t *testing.T) {
 	require.NotNil(t, msg)
 
 	assert.Equal(t, expectedTxID, msg.TxID)
-	assert.Equal(t, time.Unix(int64(1736530812), 0), msg.Timestamp)
+	assert.Equal(t, testutils.MustTimeFromUnix(t, 1736530812), msg.Timestamp)
 	assert.Equal(t, uint32(42), msg.Nonce)
 	assert.Equal(t, uint64(0), msg.Sequence)
 	assert.Equal(t, vaa.ChainIDSolana, msg.EmitterChain)
@@ -857,7 +902,7 @@ func TestShimDirectWithMultipleShimTransactions(t *testing.T) {
 	require.NotNil(t, msg)
 
 	assert.Equal(t, expectedTxID, msg.TxID)
-	assert.Equal(t, time.Unix(int64(1736530813), 0), msg.Timestamp)
+	assert.Equal(t, testutils.MustTimeFromUnix(t, 1736530813), msg.Timestamp)
 	assert.Equal(t, uint32(43), msg.Nonce)
 	assert.Equal(t, uint64(1), msg.Sequence)
 	assert.Equal(t, vaa.ChainIDSolana, msg.EmitterChain)
@@ -1053,7 +1098,7 @@ func TestShimFromIntegratorWithMultipleShimTransactions(t *testing.T) {
 	require.NotNil(t, msg)
 
 	assert.Equal(t, expectedTxID, msg.TxID)
-	assert.Equal(t, time.Unix(int64(1736542615), 0), msg.Timestamp)
+	assert.Equal(t, testutils.MustTimeFromUnix(t, 1736542615), msg.Timestamp)
 	assert.Equal(t, uint32(0), msg.Nonce)
 	assert.Equal(t, uint64(1), msg.Sequence)
 	assert.Equal(t, vaa.ChainIDSolana, msg.EmitterChain)
@@ -1074,7 +1119,7 @@ func TestShimFromIntegratorWithMultipleShimTransactions(t *testing.T) {
 	require.NotNil(t, msg)
 
 	assert.Equal(t, expectedTxID, msg.TxID)
-	assert.Equal(t, time.Unix(int64(1736542616), 0), msg.Timestamp)
+	assert.Equal(t, testutils.MustTimeFromUnix(t, 1736542616), msg.Timestamp)
 	assert.Equal(t, uint32(42), msg.Nonce)
 	assert.Equal(t, uint64(2), msg.Sequence)
 	assert.Equal(t, vaa.ChainIDSolana, msg.EmitterChain)
@@ -1269,10 +1314,10 @@ func TestShimDirectWithExtraWhEventBeforeShimEventShouldFail(t *testing.T) {
 	var shimFound bool
 	for n, key := range tx.Message.AccountKeys {
 		if key.Equals(s.contract) {
-			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 		}
 		if key.Equals(s.shimContractAddr) {
-			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 			shimFound = true
 		}
 	}
@@ -1473,10 +1518,10 @@ func TestShimDirectWithExtraShimEventsShouldFail(t *testing.T) {
 	var shimFound bool
 	for n, key := range tx.Message.AccountKeys {
 		if key.Equals(s.contract) {
-			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 		}
 		if key.Equals(s.shimContractAddr) {
-			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 			shimFound = true
 		}
 	}
@@ -1677,10 +1722,10 @@ func TestShimDirectWithExtraCoreEventShouldFail(t *testing.T) {
 	var shimFound bool
 	for n, key := range tx.Message.AccountKeys {
 		if key.Equals(s.contract) {
-			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 		}
 		if key.Equals(s.shimContractAddr) {
-			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 			shimFound = true
 		}
 	}
@@ -1869,10 +1914,10 @@ func TestShimTopLevelEmptyInstructionsShouldFail(t *testing.T) {
 	var shimFound bool
 	for n, key := range tx.Message.AccountKeys {
 		if key.Equals(s.contract) {
-			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 		}
 		if key.Equals(s.shimContractAddr) {
-			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 			shimFound = true
 		}
 	}
@@ -2026,10 +2071,10 @@ func TestShimProcessInnerInstructions_OutOfBoundsStartIndexShouldFail(t *testing
 	var shimFound bool
 	for n, key := range tx.Message.AccountKeys {
 		if key.Equals(s.contract) {
-			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 		}
 		if key.Equals(s.shimContractAddr) {
-			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 			shimFound = true
 		}
 	}
@@ -2139,10 +2184,10 @@ func TestShimWhPostMessageInUnexpectedFormatShouldNotBeCountedAsShimMessage(t *t
 	var shimFound bool
 	for n, key := range tx.Message.AccountKeys {
 		if key.Equals(s.contract) {
-			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 		}
 		if key.Equals(s.shimContractAddr) {
-			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 			shimFound = true
 		}
 	}
@@ -2195,10 +2240,10 @@ func TestShimProcessRestWithNullEventShouldFail(t *testing.T) {
 	var shimFound bool
 	for n, key := range tx.Message.AccountKeys {
 		if key.Equals(s.contract) {
-			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			whProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 		}
 		if key.Equals(s.shimContractAddr) {
-			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime max transaction size is 1232 bytes. So we'd never be able to have this many accounts.
+			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 			shimFound = true
 		}
 	}
@@ -2233,7 +2278,7 @@ func TestShimProcessRestWithoutCoreEventShouldFail(t *testing.T) {
 		}
 	}
 
-	var filtered []solana.CompiledInstruction
+	var filtered []rpc.CompiledInstruction
 	for _, inst := range txRpc.Meta.InnerInstructions[0].Instructions {
 		if inst.ProgramIDIndex != whProgramIndex && inst.ProgramIDIndex != shimProgramIndex {
 			filtered = append(filtered, inst)
@@ -2265,7 +2310,7 @@ func TestShimProcessRestWithoutShimEventShouldFail(t *testing.T) {
 		}
 	}
 
-	var filtered []solana.CompiledInstruction
+	var filtered []rpc.CompiledInstruction
 	for _, inst := range txRpc.Meta.InnerInstructions[0].Instructions {
 		if inst.ProgramIDIndex != shimProgramIndex {
 			filtered = append(filtered, inst)
@@ -2277,9 +2322,9 @@ func TestShimProcessRestWithoutShimEventShouldFail(t *testing.T) {
 	require.ErrorContains(t, err, "failed to find inner shim message event instruction")
 }
 
-// The core inner instruction has the unreliable PostMessage id (0x08) but its
-// trailing bytes can't be borsh-deserialized, so shimVerifyCoreMessage returns
-// an error and shimProcessRest wraps it.
+// The core inner instruction has the unreliable PostMessage id (0x08), but the
+// remaining bytes are truncated, so shimVerifyCoreMessage returns an error and
+// shimProcessRest wraps it.
 func TestShimProcessRestWithMalformedCoreInstructionShouldFail(t *testing.T) {
 	var txRpc rpc.TransactionWithMeta
 	require.NoError(t, json.Unmarshal([]byte(shimDirectEventJSON), &txRpc))
@@ -2297,7 +2342,7 @@ func TestShimProcessRestWithMalformedCoreInstructionShouldFail(t *testing.T) {
 		}
 	}
 
-	insts := append([]solana.CompiledInstruction(nil), txRpc.Meta.InnerInstructions[0].Instructions...)
+	insts := append([]rpc.CompiledInstruction(nil), txRpc.Meta.InnerInstructions[0].Instructions...)
 	replaced := false
 	for i := range insts {
 		if insts[i].ProgramIDIndex == whProgramIndex {

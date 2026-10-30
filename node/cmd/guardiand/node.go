@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/certusone/wormhole/node/pkg/accountant"
 	"github.com/certusone/wormhole/node/pkg/guardiansigner"
 	"github.com/certusone/wormhole/node/pkg/watchers"
 	"github.com/certusone/wormhole/node/pkg/watchers/ibc"
@@ -129,11 +130,12 @@ var (
 	ibcBlockHeightURL *string
 	ibcContract       *string
 
-	accountantContract      *string
-	accountantWS            *string
-	accountantCheckEnabled  *bool
-	accountantKeyPath       *string
-	accountantKeyPassPhrase *string
+	accountantContract                   *string
+	accountantWS                         *string
+	accountantCheckEnabled               *bool
+	accountantKeyPath                    *string
+	accountantKeyPassPhrase              *string
+	accountantSubmitObservationBatchSize *int
 
 	accountantNttContract      *string
 	accountantNttKeyPath       *string
@@ -232,6 +234,21 @@ var (
 	nexusRPC      *string
 	nexusContract *string
 
+	tronRPC      *string
+	tronContract *string
+
+	arcRPC      *string
+	arcContract *string
+
+	hydrationRPC      *string
+	hydrationContract *string
+
+	robinhoodChainRPC      *string
+	robinhoodChainContract *string
+
+	elysiumRPC      *string
+	elysiumContract *string
+
 	sepoliaRPC      *string
 	sepoliaContract *string
 
@@ -274,8 +291,9 @@ var (
 	// Loki cloud logging parameters
 	telemetryLokiURL *string
 
-	// Prometheus remote write URL
-	promRemoteURL *string
+	// Prometheus remote write URL and push interval
+	promRemoteURL      *string
+	promRemoteInterval *time.Duration
 
 	chainGovernorEnabled      *bool
 	governorFlowCancelEnabled *bool
@@ -398,6 +416,7 @@ func init() {
 	accountantKeyPath = NodeCmd.Flags().String("accountantKeyPath", "", "path to accountant private key for signing transactions")
 	accountantKeyPassPhrase = NodeCmd.Flags().String("accountantKeyPassPhrase", "", "pass phrase used to unarmor the accountant key file")
 	accountantCheckEnabled = NodeCmd.Flags().Bool("accountantCheckEnabled", false, "Should accountant be enforced on transfers")
+	accountantSubmitObservationBatchSize = NodeCmd.Flags().Int("accountantSubmitObservationBatchSize", accountant.DefaultSubmitObservationBatchSize, "maximum number of observations to submit to the accountant contract in one transaction")
 
 	accountantNttContract = NodeCmd.Flags().String("accountantNttContract", "", "Address of the NTT accountant smart contract on wormchain")
 	accountantNttKeyPath = NodeCmd.Flags().String("accountantNttKeyPath", "", "path to NTT accountant private key for signing transactions")
@@ -411,7 +430,7 @@ func init() {
 	movementAccount = NodeCmd.Flags().String("movementAccount", "", "movement account")
 	movementHandle = NodeCmd.Flags().String("movementHandle", "", "movement handle")
 
-	suiRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "suiRPC", "Sui RPC URL", "http://sui:9000", []string{"http", "https"})
+	suiRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "suiRPC", "Sui gRPC endpoint", "sui:443", []string{""})
 	suiMoveEventType = NodeCmd.Flags().String("suiMoveEventType", "", "Sui move event type for publish_message")
 
 	solanaRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "solanaRPC", "Solana RPC URL (required)", "http://solana-devnet:8899", []string{"http", "https"})
@@ -497,6 +516,21 @@ func init() {
 	nexusRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "nexusRPC", "Nexus RPC_URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
 	nexusContract = NodeCmd.Flags().String("nexusContract", "", "Nexus contract address")
 
+	tronRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "tronRPC", "Tron RPC URL", "http://eth-devnet:8545", []string{"http", "https", "ws", "wss"})
+	tronContract = NodeCmd.Flags().String("tronContract", "", "Tron contract address")
+
+	arcRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "arcRPC", "Arc RPC URL", "http://eth-devnet:8545", []string{"http", "https", "ws", "wss"})
+	arcContract = NodeCmd.Flags().String("arcContract", "", "Arc contract address")
+
+	hydrationRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "hydrationRPC", "Hydration RPC URL", "http://eth-devnet:8545", []string{"http", "https", "ws", "wss"})
+	hydrationContract = NodeCmd.Flags().String("hydrationContract", "", "Hydration contract address")
+
+	robinhoodChainRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "robinhoodChainRPC", "Robinhood Chain RPC URL", "http://eth-devnet:8545", []string{"http", "https", "ws", "wss"})
+	robinhoodChainContract = NodeCmd.Flags().String("robinhoodChainContract", "", "Robinhood Chain contract address")
+
+	elysiumRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "elysiumRPC", "Elysium RPC URL", "http://eth-devnet:8545", []string{"http", "https", "ws", "wss"})
+	elysiumContract = NodeCmd.Flags().String("elysiumContract", "", "Elysium contract address")
+
 	arbitrumSepoliaRPC = node.RegisterFlagWithValidationOrFail(NodeCmd, "arbitrumSepoliaRPC", "Arbitrum on Sepolia RPC URL", "ws://eth-devnet:8545", []string{"ws", "wss"})
 	arbitrumSepoliaContract = NodeCmd.Flags().String("arbitrumSepoliaContract", "", "Arbitrum on Sepolia contract address")
 
@@ -535,6 +569,7 @@ func init() {
 	telemetryLokiURL = NodeCmd.Flags().String("telemetryLokiURL", "", "Loki cloud logging URL")
 
 	promRemoteURL = NodeCmd.Flags().String("promRemoteURL", "", "Prometheus remote write URL (Grafana)")
+	promRemoteInterval = NodeCmd.Flags().Duration("promRemoteInterval", minPromRemoteInterval, "Interval between Prometheus remote write pushes (minimum and default 15s, e.g. 1m)")
 
 	chainGovernorEnabled = NodeCmd.Flags().Bool("chainGovernorEnabled", false, "Run the chain governor")
 	governorFlowCancelEnabled = NodeCmd.Flags().Bool("governorFlowCancelEnabled", false, "Enable flow cancel on the governor")
@@ -570,6 +605,10 @@ var (
 )
 
 const envPrefix = "GUARDIAND"
+
+// minPromRemoteInterval is the default and the shortest allowed --promRemoteInterval. Each push
+// gathers and sends the whole metrics registry, so the interval may only be lengthened.
+const minPromRemoteInterval = 15 * time.Second
 
 // "Why would anyone do this?" are famous last words.
 //
@@ -782,8 +821,12 @@ func runNode(cmd *cobra.Command, args []string) {
 	}
 
 	// Node's main lifecycle context.
-	rootCtx, rootCtxCancel = context.WithCancel(context.Background())
-	defer rootCtxCancel()
+	// Keep the cancel func in a local var so linters can see
+	// that the WithCancel return value is actually invoked.
+	var cancel context.CancelFunc
+	rootCtx, cancel = context.WithCancel(context.Background())
+	rootCtxCancel = cancel
+	defer cancel()
 
 	// Create the Guardian Signer
 	guardianSigner, err := guardiansigner.NewGuardianSignerFromUri(rootCtx, *guardianSignerUri, env == common.UnsafeDevNet)
@@ -904,6 +947,8 @@ func runNode(cmd *cobra.Command, args []string) {
 	*mocaContract = checkEvmArgs(logger, *mocaRPC, *mocaContract, vaa.ChainIDMoca)
 	*megaEthContract = checkEvmArgs(logger, *megaEthRPC, *megaEthContract, vaa.ChainIDMegaETH)
 	*zeroGravityContract = checkEvmArgs(logger, *zeroGravityRPC, *zeroGravityContract, vaa.ChainIDZeroGravity)
+	*tronContract = checkEvmArgs(logger, *tronRPC, *tronContract, vaa.ChainIDTron)
+	*elysiumContract = checkEvmArgs(logger, *elysiumRPC, *elysiumContract, vaa.ChainIDElysium)
 
 	// These chains will only ever be testnet / devnet.
 	*sepoliaContract = checkEvmArgs(logger, *sepoliaRPC, *sepoliaContract, vaa.ChainIDSepolia)
@@ -915,6 +960,9 @@ func runNode(cmd *cobra.Command, args []string) {
 	*monadTestnetContract = checkEvmArgs(logger, *monadTestnetRPC, *monadTestnetContract, vaa.ChainIDMonadTestnet)
 	*tempoContract = checkEvmArgs(logger, *tempoRPC, *tempoContract, vaa.ChainIDTempo)
 	*nexusContract = checkEvmArgs(logger, *nexusRPC, *nexusContract, vaa.ChainIDNexus)
+	*arcContract = checkEvmArgs(logger, *arcRPC, *arcContract, vaa.ChainIDArc)
+	*hydrationContract = checkEvmArgs(logger, *hydrationRPC, *hydrationContract, vaa.ChainIDHydration)
+	*robinhoodChainContract = checkEvmArgs(logger, *robinhoodChainRPC, *robinhoodChainContract, vaa.ChainIDRobinhoodChain)
 
 	if !argsConsistent([]string{*solanaContract, *solanaRPC}) {
 		logger.Fatal("Both --solanaContract and --solanaRPC must be set or both unset")
@@ -1087,6 +1135,7 @@ func runNode(cmd *cobra.Command, args []string) {
 	rpcMap["plasmaRPC"] = *plasmaRPC
 	rpcMap["creditcoinRPC"] = *creditCoinRPC
 	rpcMap["xrplRPC"] = *xrplRPC
+	rpcMap["tronRPC"] = *tronRPC
 
 	// Wormchain is in the 3000 range.
 	rpcMap["wormchainURL"] = *wormchainURL
@@ -1172,7 +1221,7 @@ func runNode(cmd *cobra.Command, args []string) {
 
 		// Connect to wormchain for the accountant.
 		logger.Info("Connecting to wormchain for accountant", zap.String("wormchainURL", *wormchainURL), zap.String("keyPath", keyPathName), zap.String("component", "gacct"))
-		accountantWormchainConn, err = wormconn.NewConn(rootCtx, *wormchainURL, wormchainKey, wormchainId)
+		accountantWormchainConn, err = wormconn.NewConn(*wormchainURL, wormchainKey, wormchainId)
 		if err != nil {
 			logger.Fatal("failed to connect to wormchain for accountant", zap.Error(err), zap.String("component", "gacct"))
 		}
@@ -1208,7 +1257,7 @@ func runNode(cmd *cobra.Command, args []string) {
 
 		// Connect to wormchain for the NTT accountant.
 		logger.Info("Connecting to wormchain for NTT accountant", zap.String("wormchainURL", *wormchainURL), zap.String("keyPath", keyPathName), zap.String("component", "gacct"))
-		accountantNttWormchainConn, err = wormconn.NewConn(rootCtx, *wormchainURL, wormchainKey, wormchainId)
+		accountantNttWormchainConn, err = wormconn.NewConn(*wormchainURL, wormchainKey, wormchainId)
 		if err != nil {
 			logger.Fatal("failed to connect to wormchain for NTT accountant", zap.Error(err), zap.String("component", "gacct"))
 		}
@@ -1242,13 +1291,27 @@ func runNode(cmd *cobra.Command, args []string) {
 		}
 
 		logger.Info("Connecting to wormchain", zap.String("wormchainURL", *wormchainURL), zap.String("keyPath", wormchainKeyPathName), zap.String("component", "gwrelayer"))
-		gatewayRelayerWormchainConn, err = wormconn.NewConn(rootCtx, *wormchainURL, wormchainKey, wormchainId)
+		gatewayRelayerWormchainConn, err = wormconn.NewConn(*wormchainURL, wormchainKey, wormchainId)
 		if err != nil {
 			logger.Fatal("failed to connect to wormchain", zap.Error(err), zap.String("component", "gwrelayer"))
 		}
 	}
 	usingPromRemoteWrite := *promRemoteURL != ""
+	// Metrics are expected alongside Loki logs outside devnet. For now a missing URL only warns;
+	// a future release will make it fatal, and --disableTelemetry will then disable metrics too.
+	if env != common.UnsafeDevNet {
+		if !*disableTelemetry && !usingPromRemoteWrite {
+			logger.Warn("--promRemoteURL is not set. A future release will require it, like --telemetryLokiURL, unless --disableTelemetry is set. Contact the Wormhole Foundation for a URL.")
+		}
+		if *disableTelemetry && usingPromRemoteWrite {
+			logger.Warn("--disableTelemetry does not disable metrics yet, so metrics are still pushed to --promRemoteURL. A future release will stop pushing metrics when --disableTelemetry is set.")
+		}
+	}
 	if usingPromRemoteWrite {
+		if *promRemoteInterval < minPromRemoteInterval {
+			logger.Fatal("--promRemoteInterval must be at least 15s", zap.Duration("promRemoteInterval", *promRemoteInterval))
+		}
+
 		var info promremotew.PromTelemetryInfo
 		info.PromRemoteURL = *promRemoteURL
 		info.Labels = map[string]string{
@@ -1260,9 +1323,10 @@ func runNode(cmd *cobra.Command, args []string) {
 		}
 
 		promLogger := logger.With(zap.String("component", "prometheus_scraper"))
+		promLogger.Info("Pushing metrics with Prometheus remote write", zap.Duration("interval", *promRemoteInterval))
 		errC := make(chan error)
 		common.StartRunnable(rootCtx, errC, false, "prometheus_scraper", func(ctx context.Context) error {
-			t := time.NewTicker(15 * time.Second)
+			t := time.NewTicker(*promRemoteInterval)
 
 			for {
 				select {
@@ -1644,6 +1708,61 @@ func runNode(cmd *cobra.Command, args []string) {
 		watcherConfigs = append(watcherConfigs, wc)
 	}
 
+	if shouldStart(tronRPC) {
+		wc := &evm.WatcherConfig{
+			NetworkID:        "tron",
+			ChainID:          vaa.ChainIDTron,
+			Rpc:              *tronRPC,
+			Contract:         *tronContract,
+			CcqBackfillCache: *ccqBackfillCache,
+		}
+		watcherConfigs = append(watcherConfigs, wc)
+	}
+
+	if shouldStart(arcRPC) {
+		wc := &evm.WatcherConfig{
+			NetworkID:        "arc",
+			ChainID:          vaa.ChainIDArc,
+			Rpc:              *arcRPC,
+			Contract:         *arcContract,
+			CcqBackfillCache: *ccqBackfillCache,
+		}
+		watcherConfigs = append(watcherConfigs, wc)
+	}
+
+	if shouldStart(hydrationRPC) {
+		wc := &evm.WatcherConfig{
+			NetworkID:        "hydration",
+			ChainID:          vaa.ChainIDHydration,
+			Rpc:              *hydrationRPC,
+			Contract:         *hydrationContract,
+			CcqBackfillCache: *ccqBackfillCache,
+		}
+		watcherConfigs = append(watcherConfigs, wc)
+	}
+
+	if shouldStart(robinhoodChainRPC) {
+		wc := &evm.WatcherConfig{
+			NetworkID:        "robinhoodchain",
+			ChainID:          vaa.ChainIDRobinhoodChain,
+			Rpc:              *robinhoodChainRPC,
+			Contract:         *robinhoodChainContract,
+			CcqBackfillCache: *ccqBackfillCache,
+		}
+		watcherConfigs = append(watcherConfigs, wc)
+	}
+
+	if shouldStart(elysiumRPC) {
+		wc := &evm.WatcherConfig{
+			NetworkID:        "elysium",
+			ChainID:          vaa.ChainIDElysium,
+			Rpc:              *elysiumRPC,
+			Contract:         *elysiumContract,
+			CcqBackfillCache: *ccqBackfillCache,
+		}
+		watcherConfigs = append(watcherConfigs, wc)
+	}
+
 	if shouldStart(terra2WS) {
 		if env != common.UnsafeDevNet {
 			logger.Fatal("Terra2 classic is only allowed in unsafe dev mode")
@@ -2014,13 +2133,13 @@ func runNode(cmd *cobra.Command, args []string) {
 	guardianOptions := []*node.GuardianOption{
 		node.GuardianOptionDatabase(db),
 		node.GuardianOptionWatchers(watcherConfigs, ibcWatcherConfig),
-		node.GuardianOptionAccountant(*accountantWS, *accountantContract, *accountantCheckEnabled, accountantWormchainConn, *accountantNttContract, accountantNttWormchainConn),
+		node.GuardianOptionAccountant(*accountantWS, *accountantContract, *accountantCheckEnabled, accountantWormchainConn, *accountantNttContract, accountantNttWormchainConn, *accountantSubmitObservationBatchSize),
 		node.GuardianOptionGovernor(*chainGovernorEnabled, *governorFlowCancelEnabled, *coinGeckoApiKey),
 		node.GuardianOptionNotary(*notaryEnabled),
 		node.GuardianOptionManagerService(*managerServiceEnabled, managerSigners, *ethRPC),
 		node.GuardianOptionGatewayRelayer(*gatewayRelayerContract, gatewayRelayerWormchainConn),
 		node.GuardianOptionQueryHandler(*ccqEnabled, *ccqAllowedRequesters),
-		node.GuardianOptionAdminService(*adminSocketPath, ethRPC, ethContract, rpcMap),
+		node.GuardianOptionAdminService(*adminSocketPath, rpcMap),
 		node.GuardianOptionStatusServer(*statusAddr),
 		node.GuardianOptionAlternatePublisher(guardianAddrAsBytes, *additionalPublishers),
 		node.GuardianOptionProcessor(*p2pNetworkID, *ethDelegatedGuardiansContract != ""),
